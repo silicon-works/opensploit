@@ -53,7 +53,7 @@ This allows for more targeted requests without needing to specify file paths or 
 Run the following command in the terminal from your GitHub repo:
 
 ```bash
-opencode github install
+opensploit github install
 ```
 
 This will walk you through installing the GitHub app, creating the workflow, and setting up secrets.
@@ -64,7 +64,7 @@ This will walk you through installing the GitHub app, creating the workflow, and
 2. Add the following workflow file to `.github/workflows/opencode.yml` in your repo. Set the appropriate `model` and required API keys in `env`.
 
    ```yml
-   name: opencode
+   name: opensploit
 
    on:
      issue_comment:
@@ -86,8 +86,8 @@ This will walk you through installing the GitHub app, creating the workflow, and
            with:
              fetch-depth: 1
 
-         - name: Run opencode
-           uses: sst/opencode/github@latest
+         - name: Run opensploit
+           uses: sst/opensploit/github@latest
            env:
              ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
            with:
@@ -118,7 +118,7 @@ To test locally:
      GITHUB_RUN_ID=dummy \
      MOCK_TOKEN=github_pat_1234567890 \
      MOCK_EVENT='{"eventName":"issue_comment",...}' \
-     bun /path/to/opencode/github/index.ts
+     bun /path/to/opensploit/github/index.ts
    ```
 
    - `MODEL`: The model used by opencode. Same as the `MODEL` defined in the GitHub workflow.

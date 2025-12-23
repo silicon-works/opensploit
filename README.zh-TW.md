@@ -1,9 +1,9 @@
 <p align="center">
   <a href="https://opencode.ai">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
+      <source srcset="packages/console/app/src/asset/logo.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/console/app/src/asset/logo.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/console/app/src/asset/logo.svg" alt="OpenCode logo">
     </picture>
   </a>
 </p>
@@ -25,13 +25,13 @@
 curl -fsSL https://opencode.ai/install | bash
 
 # 套件管理員
-npm i -g opencode-ai@latest        # 也可使用 bun/pnpm/yarn
-scoop bucket add extras; scoop install extras/opencode  # Windows
-choco install opencode             # Windows
-brew install opencode              # macOS 與 Linux
-paru -S opencode-bin               # Arch Linux
-mise use -g github:sst/opencode    # 任何作業系統
-nix run nixpkgs#opencode           # 或使用 github:sst/opencode 以取得最新開發分支
+npm i -g opensploit-ai@latest        # 也可使用 bun/pnpm/yarn
+scoop bucket add extras; scoop install extras/opensploit  # Windows
+choco install opensploit             # Windows
+brew install opensploit              # macOS 與 Linux
+paru -S opensploit-bin               # Arch Linux
+mise use -g github:sst/opensploit    # 任何作業系統
+nix run nixpkgs#opensploit           # 或使用 github:sst/opensploit 以取得最新開發分支
 ```
 
 > [!TIP]
@@ -50,7 +50,7 @@ OpenCode 也提供桌面版應用程式。您可以直接從 [發佈頁面 (rele
 
 ```bash
 # macOS (Homebrew Cask)
-brew install --cask opencode-desktop
+brew install --cask opensploit-desktop
 ```
 
 #### 安裝目錄

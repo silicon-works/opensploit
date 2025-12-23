@@ -1,8 +1,8 @@
 import "./index.css"
 import { Title } from "@solidjs/meta"
 import { onCleanup, onMount } from "solid-js"
-import logoLight from "../asset/logo-ornate-light.svg"
-import logoDark from "../asset/logo-ornate-dark.svg"
+import logoLight from "../asset/logo.svg"
+import logoDark from "../asset/logo.svg"
 import IMG_SPLASH from "../asset/lander/screenshot-splash.png"
 import { IconCopy, IconCheck } from "../component/icon"
 
@@ -38,15 +38,15 @@ export default function Home() {
 
   return (
     <main data-page="home">
-      <Title>opencode | AI coding agent built for the terminal</Title>
+      <Title>opensploit | Offensive security agent built for the terminal</Title>
 
       <div data-component="content">
         <section data-component="top">
-          <img data-slot="logo light" src={logoLight} alt="opencode logo light" />
-          <img data-slot="logo dark" src={logoDark} alt="opencode logo dark" />
+          <img data-slot="logo light" src={logoLight} alt="opensploit logo light" />
+          <img data-slot="logo dark" src={logoDark} alt="opensploit logo dark" />
           <h1 data-slot="title">The AI coding agent built for the terminal</h1>
           <div data-slot="login">
-            <a href="/auth">opencode zen</a>
+            <a href="/auth">opensploit zen</a>
           </div>
         </section>
 
@@ -55,14 +55,14 @@ export default function Home() {
             <a href="/docs">Get Started</a>
           </div>
           <div data-slot="center">
-            <a href="/auth">opencode zen</a>
+            <a href="/auth">opensploit zen</a>
           </div>
           <div data-slot="right">
             <button data-copy data-slot="command">
               <span>
                 <span>curl -fsSL </span>
                 <span data-slot="protocol">https://</span>
-                <span data-slot="highlight">opencode.ai/install</span>
+                <span data-slot="highlight">opensploit.ai/install</span>
                 <span> | bash</span>
               </span>
               <CopyStatus />
@@ -79,7 +79,7 @@ export default function Home() {
               <strong>LSP enabled</strong> Automatically loads the right LSPs for the LLM
             </li>
             <li>
-              <strong>opencode zen</strong> A <a href="/docs/zen">curated list of models</a> provided by opencode{" "}
+              <strong>opensploit zen</strong> A <a href="/docs/zen">curated list of models</a> provided by opensploit{" "}
               <label>New</label>
             </li>
             <li>
@@ -103,7 +103,7 @@ export default function Home() {
             <h3 data-component="title">npm</h3>
             <button data-copy data-slot="button">
               <span>
-                npm install -g <strong>opencode-ai</strong>
+                npm install -g <strong>opensploit-ai</strong>
               </span>
               <CopyStatus />
             </button>
@@ -112,7 +112,7 @@ export default function Home() {
             <h3 data-component="title">bun</h3>
             <button data-copy data-slot="button">
               <span>
-                bun install -g <strong>opencode-ai</strong>
+                bun install -g <strong>opensploit-ai</strong>
               </span>
               <CopyStatus />
             </button>
@@ -121,7 +121,7 @@ export default function Home() {
             <h3 data-component="title">homebrew</h3>
             <button data-copy data-slot="button">
               <span>
-                brew install <strong>opencode</strong>
+                brew install <strong>opensploit</strong>
               </span>
               <CopyStatus />
             </button>
@@ -130,7 +130,7 @@ export default function Home() {
             <h3 data-component="title">paru</h3>
             <button data-copy data-slot="button">
               <span>
-                paru -S <strong>opencode-bin</strong>
+                paru -S <strong>opensploit-bin</strong>
               </span>
               <CopyStatus />
             </button>
@@ -139,22 +139,22 @@ export default function Home() {
 
         <section data-component="screenshots">
           <figure>
-            <figcaption>opencode TUI with the tokyonight theme</figcaption>
+            <figcaption>opensploit TUI with the tokyonight theme</figcaption>
             <a href="/docs/cli">
-              <img src={IMG_SPLASH} alt="opencode TUI with tokyonight theme" />
+              <img src={IMG_SPLASH} alt="opensploit TUI with tokyonight theme" />
             </a>
           </figure>
         </section>
 
         <footer data-component="footer">
           <div data-slot="cell">
-            <a href="https://x.com/opencode">X.com</a>
+            <a href="https://x.com/opensploit">X.com</a>
           </div>
           <div data-slot="cell">
-            <a href="https://github.com/sst/opencode">GitHub</a>
+            <a href="https://github.com/silicon-works/opensploit">GitHub</a>
           </div>
           <div data-slot="cell">
-            <a href="https://opencode.ai/discord">Discord</a>
+            <a href="https://opensploit.ai/discord">Discord</a>
           </div>
         </footer>
       </div>

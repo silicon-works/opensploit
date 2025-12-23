@@ -32,7 +32,7 @@ export const DialogSelectModelUnpaid: Component = () => {
   return (
     <Dialog title="Select model">
       <div class="flex flex-col gap-3 px-2.5">
-        <div class="text-14-medium text-text-base px-2.5">Free models provided by OpenCode</div>
+        <div class="text-14-medium text-text-base px-2.5">Free models provided by OpenSploit</div>
         <List
           ref={(ref) => (listRef = ref)}
           items={local.model.list}
@@ -82,7 +82,7 @@ export const DialogSelectModelUnpaid: Component = () => {
                   <div class="w-full flex items-center gap-x-3">
                     <ProviderIcon data-slot="list-item-extra-icon" id={i.id as IconName} />
                     <span>{i.name}</span>
-                    <Show when={i.id === "opencode"}>
+                    <Show when={i.id === "opensploit"}>
                       <Tag>Recommended</Tag>
                     </Show>
                     <Show when={i.id === "anthropic"}>

@@ -33,7 +33,7 @@ const port = window.__OPENCODE__?.port ?? import.meta.env.VITE_OPENCODE_SERVER_P
 
 const url =
   new URLSearchParams(document.location.search).get("url") ||
-  (location.hostname.includes("opencode.ai") || location.hostname.includes("localhost")
+  (location.hostname.includes("opensploit.ai") || location.hostname.includes("localhost")
     ? `http://${host}:${port}`
     : window.location.origin)
 

@@ -62,7 +62,7 @@ export const DialogSelectModel: Component<{ provider?: string }> = (props) => {
         {(i) => (
           <div class="w-full flex items-center gap-x-3">
             <span>{i.name}</span>
-            <Show when={i.provider.id === "opencode" && (!i.cost || i.cost?.input === 0)}>
+            <Show when={i.provider.id === "opensploit" && (!i.cost || i.cost?.input === 0)}>
               <Tag>Free</Tag>
             </Show>
             <Show when={i.latest}>

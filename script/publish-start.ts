@@ -17,7 +17,7 @@ if (!Script.preview) {
     .then((data: any) => data.version)
 
   const log =
-    await $`git log v${previous}..HEAD --oneline --format="%h %s" -- packages/opencode packages/sdk packages/plugin packages/tauri packages/desktop`.text()
+    await $`git log v${previous}..HEAD --oneline --format="%h %s" -- packages/opensploit packages/sdk packages/plugin packages/tauri packages/desktop`.text()
 
   const commits = log
     .split("\n")
@@ -38,7 +38,7 @@ if (!Script.preview) {
     "fwang",
     "adamdotdevin",
     "iamdavidhill",
-    "opencode-agent[bot]",
+    "opensploit-agent[bot]",
   ]
 
   const raw = await opencode.client.session
@@ -169,8 +169,8 @@ await Bun.file(extensionToml).write(toml)
 
 await $`bun install`
 
-console.log("\n=== opencode ===\n")
-await import(`../packages/opencode/script/publish.ts`)
+console.log("\n=== opensploit ===\n")
+await import(`../packages/opensploit/script/publish.ts`)
 
 console.log("\n=== sdk ===\n")
 await import(`../packages/sdk/js/script/publish.ts`)
@@ -190,7 +190,7 @@ if (!Script.preview) {
   await $`git cherry-pick HEAD..origin/dev`.nothrow()
   await $`git push origin HEAD --tags --no-verify --force-with-lease`
   await new Promise((resolve) => setTimeout(resolve, 5_000))
-  await $`gh release create v${Script.version} -d --title "v${Script.version}" --notes ${notes.join("\n") || "No notable changes"} ./packages/opencode/dist/*.zip ./packages/opencode/dist/*.tar.gz`
+  await $`gh release create v${Script.version} -d --title "v${Script.version}" --notes ${notes.join("\n") || "No notable changes"} ./packages/opensploit/dist/*.zip ./packages/opensploit/dist/*.tar.gz`
   const release = await $`gh release view v${Script.version} --json id,tagName`.json()
   output += `release=${release.id}\n`
   output += `tag=${release.tagName}\n`

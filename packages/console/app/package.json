@@ -6,7 +6,7 @@
     "typecheck": "tsgo --noEmit",
     "dev": "vite dev --host 0.0.0.0",
     "dev:remote": "VITE_AUTH_URL=https://auth.dev.opencode.ai bun sst shell --stage=dev bun dev",
-    "build": "./script/generate-sitemap.ts && vite build && ../../opencode/script/schema.ts ./.output/public/config.json",
+    "build": "./script/generate-sitemap.ts && vite build && ../../opensploit/script/schema.ts ./.output/public/config.json",
     "start": "vite start"
   },
   "dependencies": {

@@ -31,7 +31,7 @@ permissions:
 jobs:
   publish:
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    if: github.repository == 'sst/opencode'
+    if: github.repository == 'sst/opensploit'
     steps:
       - uses: actions/checkout@v3
         with:
@@ -43,7 +43,7 @@ jobs:
 
       - name: Install OpenCode
         if: inputs.bump || inputs.version
-        run: bun i -g opencode-ai@1.0.169
+        run: bun i -g opensploit-ai@1.0.169
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -82,8 +82,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: opencode-cli
-          path: packages/opencode/dist
+          name: opensploit-cli
+          path: packages/opensploit/dist
 
     outputs:
       release: ${{ steps.publish.outputs.release }}
@@ -198,7 +198,7 @@ jobs:
           updaterJsonPreferNsis: true
           releaseId: ${{ needs.publish.outputs.release }}
           tagName: ${{ needs.publish.outputs.tag }}
-          releaseAssetNamePattern: opencode-desktop-[platform]-[arch][ext]
+          releaseAssetNamePattern: opensploit-desktop-[platform]-[arch][ext]
           releaseDraft: true
 
   publish-release:

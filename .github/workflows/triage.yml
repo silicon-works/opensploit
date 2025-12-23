@@ -19,8 +19,8 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/setup-bun
 
-      - name: Install opencode
-        run: curl -fsSL https://opencode.ai/install | bash
+      - name: Install opensploit
+        run: curl -fsSL https://opensploit.ai/install | bash
 
       - name: Triage issue
         env:

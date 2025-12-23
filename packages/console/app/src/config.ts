@@ -3,11 +3,11 @@
  */
 export const config = {
   // Base URL
-  baseUrl: "https://opencode.ai",
+  baseUrl: "https://opensploit.ai",
 
   // GitHub
   github: {
-    repoUrl: "https://github.com/sst/opencode",
+    repoUrl: "https://github.com/silicon-works/opensploit",
     starsFormatted: {
       compact: "38K",
       full: "38,000",
@@ -16,8 +16,8 @@ export const config = {
 
   // Social links
   social: {
-    twitter: "https://x.com/opencode",
-    discord: "https://discord.gg/opencode",
+    twitter: "https://x.com/opensploit",
+    discord: "https://discord.gg/opensploit",
   },
 
   // Static stats (used on landing page)

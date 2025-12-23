@@ -5,7 +5,7 @@ import { copyBinaryToSidecarFolder, getCurrentSidecar } from "./utils"
 
 const sidecarConfig = getCurrentSidecar()
 
-const dir = "src-tauri/target/opencode-binaries"
+const dir = "src-tauri/target/opensploit-binaries"
 
 await $`mkdir -p ${dir}`
 await $`gh run download ${Bun.env.GITHUB_RUN_ID} -n opencode-cli`.cwd(dir)

@@ -46,8 +46,8 @@ export default defineConfig({
       },
       customCss: ["./src/styles/custom.css"],
       logo: {
-        light: "./src/assets/logo-light.svg",
-        dark: "./src/assets/logo-dark.svg",
+        light: "./src/assets/logo.svg",
+        dark: "./src/assets/logo.svg",
         replacesTitle: true,
       },
       sidebar: [
@@ -109,7 +109,7 @@ function configSchema() {
     hooks: {
       "astro:build:done": async () => {
         console.log("generating config schema")
-        spawnSync("../opencode/script/schema.ts", ["./dist/config.json"])
+        spawnSync("../opensploit/script/schema.ts", ["./dist/config.json"])
       },
     },
   }
