@@ -1,18 +1,18 @@
-import logoLight from "../asset/logo-ornate-light.svg"
-import logoDark from "../asset/logo-ornate-dark.svg"
+import logoLight from "../asset/logo.svg"
+import logoDark from "../asset/logo.svg"
 import copyLogoLight from "../asset/lander/logo-light.svg"
 import copyLogoDark from "../asset/lander/logo-dark.svg"
-import copyWordmarkLight from "../asset/lander/wordmark-light.svg"
-import copyWordmarkDark from "../asset/lander/wordmark-dark.svg"
+import copyWordmarkLight from "../asset/lander/opensploit-wordmark-light.svg"
+import copyWordmarkDark from "../asset/lander/opensploit-wordmark-dark.svg"
 import copyBrandAssetsLight from "../asset/lander/brand-assets-light.svg"
 import copyBrandAssetsDark from "../asset/lander/brand-assets-dark.svg"
 
 // SVG files for copying (separate from button icons)
 // Replace these with your actual SVG files for copying
-import copyLogoSvgLight from "../asset/lander/opencode-logo-light.svg"
-import copyLogoSvgDark from "../asset/lander/opencode-logo-dark.svg"
-import copyWordmarkSvgLight from "../asset/lander/opencode-wordmark-light.svg"
-import copyWordmarkSvgDark from "../asset/lander/opencode-wordmark-dark.svg"
+import copyLogoSvgLight from "../asset/lander/opensploit-logo-light.svg"
+import copyLogoSvgDark from "../asset/lander/opensploit-logo-dark.svg"
+import copyWordmarkSvgLight from "../asset/lander/opensploit-wordmark-light.svg"
+import copyWordmarkSvgDark from "../asset/lander/opensploit-wordmark-dark.svg"
 import { A, createAsync, useNavigate } from "@solidjs/router"
 import { createMemo, Match, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -119,8 +119,8 @@ export function Header(props: { zen?: boolean; hideGetStarted?: boolean }) {
     <section data-component="top">
       <div onContextMenu={handleLogoContextMenu}>
         <A href="/">
-          <img data-slot="logo light" src={logoLight} alt="opencode logo light" width="189" height="34" />
-          <img data-slot="logo dark" src={logoDark} alt="opencode logo dark" width="189" height="34" />
+          <img data-slot="logo light" src={logoLight} alt="opensploit logo light" width="189" height="34" />
+          <img data-slot="logo dark" src={logoDark} alt="opensploit logo dark" width="189" height="34" />
         </A>
       </div>
 

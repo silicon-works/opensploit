@@ -33,7 +33,7 @@ const url = iife(() => {
   const param = new URLSearchParams(document.location.search).get("url")
   if (param) return param
 
-  if (location.hostname.includes("opencode.ai")) return "http://localhost:4096"
+  if (location.hostname.includes("opensploit.ai")) return "http://localhost:4096"
   if (window.__OPENCODE__) return `http://127.0.0.1:${window.__OPENCODE__.port}`
   if (import.meta.env.DEV)
     return `http://${import.meta.env.VITE_OPENCODE_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_OPENCODE_SERVER_PORT ?? "4096"}`

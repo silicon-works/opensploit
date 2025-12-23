@@ -1,17 +1,17 @@
 ---
 title: GitHub
-description: Use OpenCode in GitHub issues and pull-requests.
+description: Use OpenSploit in GitHub issues and pull-requests.
 ---
 
-OpenCode integrates with your GitHub workflow. Mention `/opencode` or `/oc` in your comment, and OpenCode will execute tasks within your GitHub Actions runner.
+OpenSploit integrates with your GitHub workflow. Mention `/opencode` or `/oc` in your comment, and OpenSploit will execute tasks within your GitHub Actions runner.
 
 ---
 
 ## Features
 
-- **Triage issues**: Ask OpenCode to look into an issue and explain it to you.
-- **Fix and implement**: Ask OpenCode to fix an issue or implement a feature. And it will work in a new branch and submits a PR with all the changes.
-- **Secure**: OpenCode runs inside your GitHub's runners.
+- **Triage issues**: Ask OpenSploit to look into an issue and explain it to you.
+- **Fix and implement**: Ask OpenSploit to fix an issue or implement a feature. And it will work in a new branch and submits a PR with all the changes.
+- **Secure**: OpenSploit runs inside your GitHub's runners.
 
 ---
 
@@ -62,8 +62,8 @@ Or you can set it up manually.
            with:
              fetch-depth: 1
 
-         - name: Run OpenCode
-           uses: sst/opencode/github@latest
+         - name: Run OpenSploit
+           uses: silicon-works/opensploit/github@latest
            env:
              ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
            with:
@@ -80,13 +80,13 @@ Or you can set it up manually.
 
 ## Configuration
 
-- `model`: The model to use with OpenCode. Takes the format of `provider/model`. This is **required**.
+- `model`: The model to use with OpenSploit. Takes the format of `provider/model`. This is **required**.
 - `agent`: The agent to use. Must be a primary agent. Falls back to `default_agent` from config or `"build"` if not found.
-- `share`: Whether to share the OpenCode session. Defaults to **true** for public repositories.
-- `prompt`: Optional custom prompt to override the default behavior. Use this to customize how OpenCode processes requests.
-- `token`: Optional GitHub access token for performing operations such as creating comments, committing changes, and opening pull requests. By default, OpenCode uses the installation access token from the OpenCode GitHub App, so commits, comments, and pull requests appear as coming from the app.
+- `share`: Whether to share the OpenSploit session. Defaults to **true** for public repositories.
+- `prompt`: Optional custom prompt to override the default behavior. Use this to customize how OpenSploit processes requests.
+- `token`: Optional GitHub access token for performing operations such as creating comments, committing changes, and opening pull requests. By default, OpenSploit uses the installation access token from the OpenSploit GitHub App, so commits, comments, and pull requests appear as coming from the app.
 
-  Alternatively, you can use the GitHub Action runner's [built-in `GITHUB_TOKEN`](https://docs.github.com/en/actions/tutorials/authenticate-with-github_token) without installing the OpenCode GitHub App. Just make sure to grant the required permissions in your workflow:
+  Alternatively, you can use the GitHub Action runner's [built-in `GITHUB_TOKEN`](https://docs.github.com/en/actions/tutorials/authenticate-with-github_token) without installing the OpenSploit GitHub App. Just make sure to grant the required permissions in your workflow:
 
   ```yaml
   permissions:
@@ -102,21 +102,21 @@ Or you can set it up manually.
 
 ## Supported Events
 
-OpenCode can be triggered by the following GitHub events:
+OpenSploit can be triggered by the following GitHub events:
 
 | Event Type                    | Triggered By                           | Details                                                                                                                                                             |
 | ----------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `issue_comment`               | Comment on an issue or PR              | Mention `/opencode` or `/oc` in your comment. OpenCode reads the issue/PR context and can create branches, open PRs, or reply with explanations.                    |
-| `pull_request_review_comment` | Comment on specific code lines in a PR | Mention `/opencode` or `/oc` while reviewing code. OpenCode receives file path, line numbers, and diff context for precise responses.                               |
-| `schedule`                    | Cron-based schedule                    | Run OpenCode on a schedule using the `prompt` input. Useful for automated code reviews, reports, or maintenance tasks. OpenCode can create issues or PRs as needed. |
-| `pull_request`                | PR opened or updated                   | Automatically trigger OpenCode when PRs are opened, synchronized, or reopened. Useful for automated reviews without needing to leave a comment.                     |
+| `issue_comment`               | Comment on an issue or PR              | Mention `/opencode` or `/oc` in your comment. OpenSploit reads the issue/PR context and can create branches, open PRs, or reply with explanations.                    |
+| `pull_request_review_comment` | Comment on specific code lines in a PR | Mention `/opencode` or `/oc` while reviewing code. OpenSploit receives file path, line numbers, and diff context for precise responses.                               |
+| `schedule`                    | Cron-based schedule                    | Run OpenSploit on a schedule using the `prompt` input. Useful for automated code reviews, reports, or maintenance tasks. OpenSploit can create issues or PRs as needed. |
+| `pull_request`                | PR opened or updated                   | Automatically trigger OpenSploit when PRs are opened, synchronized, or reopened. Useful for automated reviews without needing to leave a comment.                     |
 
 ### Schedule Example
 
-Run OpenCode on a schedule to perform automated tasks:
+Run OpenSploit on a schedule to perform automated tasks:
 
 ```yaml title=".github/workflows/opencode-scheduled.yml"
-name: Scheduled OpenCode Task
+name: Scheduled OpenSploit Task
 
 on:
   schedule:
@@ -134,8 +134,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run OpenCode
-        uses: sst/opencode/github@latest
+      - name: Run OpenSploit
+        uses: silicon-works/opensploit/github@latest
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
@@ -147,7 +147,7 @@ jobs:
 
 For scheduled events, the `prompt` input is **required** since there's no comment to extract instructions from.
 
-> **Note:** Scheduled workflows run without a user context to permission-check, so the workflow must grant `contents: write` and `pull-requests: write` if you expect OpenCode to create branches or PRs during a scheduled run.
+> **Note:** Scheduled workflows run without a user context to permission-check, so the workflow must grant `contents: write` and `pull-requests: write` if you expect OpenSploit to create branches or PRs during a scheduled run.
 
 ---
 
@@ -190,10 +190,10 @@ For `pull_request` events, if no `prompt` is provided, OpenCode defaults to revi
 
 ## Custom prompts
 
-Override the default prompt to customize OpenCode's behavior for your workflow.
+Override the default prompt to customize OpenSploit's behavior for your workflow.
 
 ```yaml title=".github/workflows/opencode.yml"
-- uses: sst/opencode/github@latest
+- uses: silicon-works/opensploit/github@latest
   with:
     model: anthropic/claude-sonnet-4-5
     prompt: |
@@ -209,7 +209,7 @@ This is useful for enforcing specific review criteria, coding standards, or focu
 
 ## Examples
 
-Here are some examples of how you can use OpenCode in GitHub.
+Here are some examples of how you can use OpenSploit in GitHub.
 
 - **Explain an issue**
 
@@ -219,7 +219,7 @@ Here are some examples of how you can use OpenCode in GitHub.
   /opencode explain this issue
   ```
 
-  OpenCode will read the entire thread, including all comments, and reply with a clear explanation.
+  OpenSploit will read the entire thread, including all comments, and reply with a clear explanation.
 
 - **Fix an issue**
 
@@ -229,7 +229,7 @@ Here are some examples of how you can use OpenCode in GitHub.
   /opencode fix this
   ```
 
-  And OpenCode will create a new branch, implement the changes, and open a PR with the changes.
+  And OpenSploit will create a new branch, implement the changes, and open a PR with the changes.
 
 - **Review PRs and make changes**
 
@@ -239,18 +239,18 @@ Here are some examples of how you can use OpenCode in GitHub.
   Delete the attachment from S3 when the note is removed /oc
   ```
 
-  OpenCode will implement the requested change and commit it to the same PR.
+  OpenSploit will implement the requested change and commit it to the same PR.
 
 - **Review specific code lines**
 
-  Leave a comment directly on code lines in the PR's "Files" tab. OpenCode automatically detects the file, line numbers, and diff context to provide precise responses.
+  Leave a comment directly on code lines in the PR's "Files" tab. OpenSploit automatically detects the file, line numbers, and diff context to provide precise responses.
 
   ```
   [Comment on specific lines in Files tab]
   /oc add error handling here
   ```
 
-  When commenting on specific lines, OpenCode receives:
+  When commenting on specific lines, OpenSploit receives:
   - The exact file being reviewed
   - The specific lines of code
   - The surrounding diff context

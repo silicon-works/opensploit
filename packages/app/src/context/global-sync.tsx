@@ -314,7 +314,7 @@ function createGlobalSync() {
         globalSDK.client.project.list().then(async (x) => {
           setGlobalStore(
             "project",
-            x.data!.filter((p) => !p.worktree.includes("opencode-test")).sort((a, b) => a.id.localeCompare(b.id)),
+            x.data!.filter((p) => !p.worktree.includes("opensploit-test")).sort((a, b) => a.id.localeCompare(b.id)),
           )
         }),
       ),

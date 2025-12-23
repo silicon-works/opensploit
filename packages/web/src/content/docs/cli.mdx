@@ -1,27 +1,27 @@
 ---
 title: CLI
-description: OpenCode CLI options and commands.
+description: OpenSploit CLI options and commands.
 ---
 
 import { Tabs, TabItem } from "@astrojs/starlight/components"
 
-The OpenCode CLI by default starts the [TUI](/docs/tui) when run without any arguments.
+The OpenSploit CLI by default starts the [TUI](/docs/tui) when run without any arguments.
 
 ```bash
 opencode
 ```
 
-But it also accepts commands as documented on this page. This allows you to interact with OpenCode programmatically.
+But it also accepts commands as documented on this page. This allows you to interact with OpenSploit programmatically.
 
 ```bash
-opencode run "Explain how closures work in JavaScript"
+opensploit run "Explain how closures work in JavaScript"
 ```
 
 ---
 
 ### tui
 
-Start the OpenCode terminal user interface.
+Start the OpenSploit terminal user interface.
 
 ```bash
 opencode [project]
@@ -43,13 +43,13 @@ opencode [project]
 
 ## Commands
 
-The OpenCode CLI also has the following commands.
+The OpenSploit CLI also has the following commands.
 
 ---
 
 ### agent
 
-Manage agents for OpenCode.
+Manage agents for OpenSploit.
 
 ```bash
 opencode agent [command]
@@ -81,13 +81,13 @@ opencode auth [command]
 
 #### login
 
-OpenCode is powered by the provider list at [Models.dev](https://models.dev), so you can use `opencode auth login` to configure API keys for any provider you'd like to use. This is stored in `~/.local/share/opencode/auth.json`.
+OpenSploit is powered by the provider list at [Models.dev](https://models.dev), so you can use `opencode auth login` to configure API keys for any provider you'd like to use. This is stored in `~/.local/share/opencode/auth.json`.
 
 ```bash
 opencode auth login
 ```
 
-When OpenCode starts up it loads the providers from the credentials file. And if there are any keys defined in your environments or a `.env` file in your project.
+When OpenSploit starts up it loads the providers from the credentials file. And if there are any keys defined in your environments or a `.env` file in your project.
 
 ---
 
@@ -181,7 +181,7 @@ opencode models anthropic
 | `--refresh` | Refresh the models cache from models.dev                     |
 | `--verbose` | Use more verbose model output (includes metadata like costs) |
 
-Use the `--refresh` flag to update the cached model list. This is useful when new models have been added to a provider and you want to see them in OpenCode.
+Use the `--refresh` flag to update the cached model list. This is useful when new models have been added to a provider and you want to see them in OpenSploit.
 
 ```bash
 opencode models --refresh
@@ -194,13 +194,13 @@ opencode models --refresh
 Run opencode in non-interactive mode by passing a prompt directly.
 
 ```bash
-opencode run [message..]
+opensploit run [message..]
 ```
 
 This is useful for scripting, automation, or when you want a quick answer without launching the full TUI. For example.
 
-```bash "opencode run"
-opencode run Explain the use of context in Go
+```bash "opensploit run"
+opensploit run Explain the use of context in Go
 ```
 
 You can also attach to a running `opencode serve` instance to avoid MCP server cold boot times on every run:
@@ -210,7 +210,7 @@ You can also attach to a running `opencode serve` instance to avoid MCP server c
 opencode serve
 
 # In another terminal, run commands that attach to it
-opencode run --attach http://localhost:4096 "Explain async/await in JavaScript"
+opensploit run --attach http://localhost:4096 "Explain async/await in JavaScript"
 ```
 
 #### Flags
@@ -293,25 +293,25 @@ The opencode CLI takes the following global flags.
 
 ## Environment variables
 
-OpenCode can be configured using environment variables.
+OpenSploit can be configured using environment variables.
 
 | Variable                              | Type    | Description                              |
 | ------------------------------------- | ------- | ---------------------------------------- |
-| `OPENCODE_AUTO_SHARE`                 | boolean | Automatically share sessions             |
-| `OPENCODE_GIT_BASH_PATH`              | string  | Path to Git Bash executable on Windows   |
-| `OPENCODE_CONFIG`                     | string  | Path to config file                      |
-| `OPENCODE_CONFIG_DIR`                 | string  | Path to config directory                 |
-| `OPENCODE_CONFIG_CONTENT`             | string  | Inline json config content               |
-| `OPENCODE_DISABLE_AUTOUPDATE`         | boolean | Disable automatic update checks          |
-| `OPENCODE_DISABLE_PRUNE`              | boolean | Disable pruning of old data              |
-| `OPENCODE_DISABLE_TERMINAL_TITLE`     | boolean | Disable automatic terminal title updates |
-| `OPENCODE_PERMISSION`                 | string  | Inlined json permissions config          |
-| `OPENCODE_DISABLE_DEFAULT_PLUGINS`    | boolean | Disable default plugins                  |
-| `OPENCODE_DISABLE_LSP_DOWNLOAD`       | boolean | Disable automatic LSP server downloads   |
-| `OPENCODE_ENABLE_EXPERIMENTAL_MODELS` | boolean | Enable experimental models               |
-| `OPENCODE_DISABLE_AUTOCOMPACT`        | boolean | Disable automatic context compaction     |
-| `OPENCODE_CLIENT`                     | string  | Client identifier (defaults to `cli`)    |
-| `OPENCODE_ENABLE_EXA`                 | boolean | Enable Exa web search tools              |
+| `OPENSPLOIT_AUTO_SHARE`                 | boolean | Automatically share sessions             |
+| `OPENSPLOIT_GIT_BASH_PATH`              | string  | Path to Git Bash executable on Windows   |
+| `OPENSPLOIT_CONFIG`                     | string  | Path to config file                      |
+| `OPENSPLOIT_CONFIG_DIR`                 | string  | Path to config directory                 |
+| `OPENSPLOIT_CONFIG_CONTENT`             | string  | Inline json config content               |
+| `OPENSPLOIT_DISABLE_AUTOUPDATE`         | boolean | Disable automatic update checks          |
+| `OPENSPLOIT_DISABLE_PRUNE`              | boolean | Disable pruning of old data              |
+| `OPENSPLOIT_DISABLE_TERMINAL_TITLE`     | boolean | Disable automatic terminal title updates |
+| `OPENSPLOIT_PERMISSION`                 | string  | Inlined json permissions config          |
+| `OPENSPLOIT_DISABLE_DEFAULT_PLUGINS`    | boolean | Disable default plugins                  |
+| `OPENSPLOIT_DISABLE_LSP_DOWNLOAD`       | boolean | Disable automatic LSP server downloads   |
+| `OPENSPLOIT_ENABLE_EXPERIMENTAL_MODELS` | boolean | Enable experimental models               |
+| `OPENSPLOIT_DISABLE_AUTOCOMPACT`        | boolean | Disable automatic context compaction     |
+| `OPENSPLOIT_CLIENT`                     | string  | Client identifier (defaults to `cli`)    |
+| `OPENSPLOIT_ENABLE_EXA`                 | boolean | Enable Exa web search tools              |
 
 ---
 
@@ -321,11 +321,11 @@ These environment variables enable experimental features that may change or be r
 
 | Variable                                        | Type    | Description                             |
 | ----------------------------------------------- | ------- | --------------------------------------- |
-| `OPENCODE_EXPERIMENTAL`                         | boolean | Enable all experimental features        |
-| `OPENCODE_EXPERIMENTAL_ICON_DISCOVERY`          | boolean | Enable icon discovery                   |
-| `OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT`  | boolean | Disable copy on select in TUI           |
-| `OPENCODE_EXPERIMENTAL_BASH_MAX_OUTPUT_LENGTH`  | number  | Max output length for bash commands     |
-| `OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS` | number  | Default timeout for bash commands in ms |
-| `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`        | number  | Max output tokens for LLM responses     |
-| `OPENCODE_EXPERIMENTAL_FILEWATCHER`             | boolean | Enable file watcher for entire dir      |
-| `OPENCODE_EXPERIMENTAL_OXFMT`                   | boolean | Enable oxfmt formatter                  |
+| `OPENSPLOIT_EXPERIMENTAL`                         | boolean | Enable all experimental features        |
+| `OPENSPLOIT_EXPERIMENTAL_ICON_DISCOVERY`          | boolean | Enable icon discovery                   |
+| `OPENSPLOIT_EXPERIMENTAL_DISABLE_COPY_ON_SELECT`  | boolean | Disable copy on select in TUI           |
+| `OPENSPLOIT_EXPERIMENTAL_BASH_MAX_OUTPUT_LENGTH`  | number  | Max output length for bash commands     |
+| `OPENSPLOIT_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS` | number  | Default timeout for bash commands in ms |
+| `OPENSPLOIT_EXPERIMENTAL_OUTPUT_TOKEN_MAX`        | number  | Max output tokens for LLM responses     |
+| `OPENSPLOIT_EXPERIMENTAL_FILEWATCHER`             | boolean | Enable file watcher for entire dir      |
+| `OPENSPLOIT_EXPERIMENTAL_OXFMT`                   | boolean | Enable oxfmt formatter                  |

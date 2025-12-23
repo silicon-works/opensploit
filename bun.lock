@@ -254,7 +254,7 @@
       "name": "opencode",
       "version": "1.0.192",
       "bin": {
-        "opencode": "./bin/opencode",
+        "opensploit": "./bin/opensploit",
       },
       "dependencies": {
         "@actions/core": "1.11.1",
