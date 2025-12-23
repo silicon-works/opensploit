@@ -2624,7 +2624,7 @@ export namespace Server {
   }
 
   export function listen(opts: { port: number; hostname: string }) {
-    const server = Bun.serve({
+    const args = {
       hostname: opts.hostname,
       idleTimeout: 0,
       fetch: App().fetch,
