@@ -15,6 +15,14 @@ import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 
+// Pentest agent prompts
+import PROMPT_PENTEST from "./prompt/pentest.txt"
+import PROMPT_PENTEST_RECON from "./prompt/pentest/recon.txt"
+import PROMPT_PENTEST_ENUM from "./prompt/pentest/enum.txt"
+import PROMPT_PENTEST_EXPLOIT from "./prompt/pentest/exploit.txt"
+import PROMPT_PENTEST_POST_EXPLOIT from "./prompt/pentest/post-exploit.txt"
+import PROMPT_PENTEST_REPORT from "./prompt/pentest/report.txt"
+
 export namespace Agent {
   export const Info = z
     .object({
@@ -114,6 +122,51 @@ export namespace Agent {
       cfg.permission ?? {},
     )
 
+    // Pentest agents use ask permission for most actions (security-sensitive)
+    const pentestPermission = mergeAgentPermissions(
+      {
+        edit: "ask",
+        bash: {
+          "*": "ask",
+        },
+        skill: {
+          "*": "ask",
+        },
+        webfetch: "ask",
+      },
+      cfg.permission ?? {},
+    )
+
+    // Pentest recon/enum agents are more restricted (no edit)
+    const pentestReadOnlyPermission = mergeAgentPermissions(
+      {
+        edit: "deny",
+        bash: {
+          "*": "ask",
+        },
+        skill: {
+          "*": "ask",
+        },
+        webfetch: "ask",
+      },
+      cfg.permission ?? {},
+    )
+
+    // Pentest report agent can write files but not run commands
+    const pentestReportPermission = mergeAgentPermissions(
+      {
+        edit: "allow",
+        bash: {
+          "*": "deny",
+        },
+        skill: {
+          "*": "deny",
+        },
+        webfetch: "deny",
+      },
+      cfg.permission ?? {},
+    )
+
     const result: Record<string, Info> = {
       build: {
         name: "build",
@@ -194,6 +247,97 @@ export namespace Agent {
         permission: agentPermission,
         prompt: PROMPT_SUMMARY,
         tools: {},
+      },
+
+      // ============================================
+      // Pentest Agents
+      // ============================================
+
+      // Master pentest agent - primary orchestrator
+      pentest: {
+        name: "pentest",
+        description:
+          "Master penetration testing agent that orchestrates security assessments. Use this for comprehensive pentests, vulnerability assessments, and security testing.",
+        mode: "primary",
+        native: true,
+        color: "#e74c3c",
+        prompt: PROMPT_PENTEST,
+        tools: { ...defaultTools },
+        options: {},
+        permission: pentestPermission,
+      },
+
+      // Reconnaissance subagent
+      "pentest/recon": {
+        name: "pentest/recon",
+        description:
+          "Reconnaissance phase subagent. Discovers open ports, services, and performs initial target enumeration. Can delegate sub-tasks to general agent.",
+        mode: "subagent",
+        native: true,
+        color: "#3498db",
+        prompt: PROMPT_PENTEST_RECON,
+        tools: { ...defaultTools },
+        options: {},
+        permission: pentestReadOnlyPermission,
+      },
+
+      // Enumeration subagent
+      "pentest/enum": {
+        name: "pentest/enum",
+        description:
+          "Enumeration phase subagent. Performs detailed service enumeration, directory discovery, and vulnerability identification. Can delegate sub-tasks.",
+        mode: "subagent",
+        native: true,
+        color: "#9b59b6",
+        prompt: PROMPT_PENTEST_ENUM,
+        tools: { ...defaultTools },
+        options: {},
+        permission: pentestReadOnlyPermission,
+      },
+
+      // Exploitation subagent
+      "pentest/exploit": {
+        name: "pentest/exploit",
+        description:
+          "Exploitation phase subagent. Tests and validates vulnerabilities through controlled exploitation. Can write custom exploits and delegate research.",
+        mode: "subagent",
+        native: true,
+        color: "#e74c3c",
+        prompt: PROMPT_PENTEST_EXPLOIT,
+        tools: { ...defaultTools },
+        options: {},
+        permission: pentestPermission,
+      },
+
+      // Post-exploitation subagent
+      "pentest/post-exploit": {
+        name: "pentest/post-exploit",
+        description:
+          "Post-exploitation phase subagent. Assesses privilege escalation, lateral movement, and data exposure from compromised systems. Can delegate enumeration tasks.",
+        mode: "subagent",
+        native: true,
+        color: "#f39c12",
+        prompt: PROMPT_PENTEST_POST_EXPLOIT,
+        tools: { ...defaultTools },
+        options: {},
+        permission: pentestPermission,
+      },
+
+      // Reporting subagent
+      "pentest/report": {
+        name: "pentest/report",
+        description:
+          "Reporting phase subagent. Generates comprehensive penetration test reports with findings, evidence, and remediation recommendations.",
+        mode: "subagent",
+        native: true,
+        color: "#27ae60",
+        prompt: PROMPT_PENTEST_REPORT,
+        tools: {
+          ...defaultTools,
+          bash: false, // Report agent shouldn't run commands
+        },
+        options: {},
+        permission: pentestReportPermission,
       },
     }
     for (const [key, value] of Object.entries(cfg.agent ?? {})) {
