@@ -26,6 +26,7 @@ import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
 import { ToolRegistrySearchTool } from "./tool-registry-search"
 import { McpToolInvoke } from "./mcp-tool"
+import { ReadToolOutputTool } from "./read-tool-output"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -109,6 +110,7 @@ export namespace ToolRegistry {
       SkillTool,
       ToolRegistrySearchTool,
       McpToolInvoke,
+      ReadToolOutputTool,
       ...(Flag.OPENSPLOIT_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...custom,

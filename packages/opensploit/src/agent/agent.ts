@@ -122,13 +122,60 @@ export namespace Agent {
       cfg.permission ?? {},
     )
 
-    // Pentest agents use ask permission for most actions (security-sensitive)
+    // Pentest agents use restricted bash permissions
+    // DENY all security tools - they must use MCP tools instead
+    const pentestBashPermissions = {
+      // Explicitly DENY security tools (agents must use MCP tools)
+      "nmap*": "deny",
+      "ssh *": "deny",
+      "ssh-*": "deny",
+      "scp *": "deny",
+      "sqlmap*": "deny",
+      "hydra*": "deny",
+      "nikto*": "deny",
+      "gobuster*": "deny",
+      "ffuf*": "deny",
+      "dirb*": "deny",
+      "wpscan*": "deny",
+      "curl *": "deny",
+      "wget *": "deny",
+      "nc *": "deny",
+      "ncat*": "deny",
+      "netcat*": "deny",
+      "metasploit*": "deny",
+      "msfconsole*": "deny",
+      "msfvenom*": "deny",
+      "john*": "deny",
+      "hashcat*": "deny",
+      "crackmapexec*": "deny",
+      "enum4linux*": "deny",
+      "smbclient*": "deny",
+      "rpcclient*": "deny",
+      "impacket*": "deny",
+      "python*mcp*": "deny",
+      "linpeas*": "deny",
+      "winpeas*": "deny",
+      "sudo *": "deny",
+      // Allow basic file system operations
+      "ls*": "allow",
+      "pwd*": "allow",
+      "cat *": "allow",
+      "head *": "allow",
+      "tail *": "allow",
+      "less *": "allow",
+      "file *": "allow",
+      "wc *": "allow",
+      "grep *": "allow",
+      "find *": "ask",
+      "cd *": "allow",
+      // Everything else requires explicit approval
+      "*": "ask",
+    } as const
+
     const pentestPermission = mergeAgentPermissions(
       {
         edit: "ask",
-        bash: {
-          "*": "ask",
-        },
+        bash: pentestBashPermissions,
         skill: {
           "*": "ask",
         },
@@ -141,9 +188,7 @@ export namespace Agent {
     const pentestReadOnlyPermission = mergeAgentPermissions(
       {
         edit: "deny",
-        bash: {
-          "*": "ask",
-        },
+        bash: pentestBashPermissions,
         skill: {
           "*": "ask",
         },

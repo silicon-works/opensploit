@@ -2,6 +2,7 @@ import z from "zod"
 import { Tool } from "./tool"
 import { ContainerManager } from "../container"
 import { Log } from "../util/log"
+import { OutputStore } from "./output-store"
 import path from "path"
 import os from "os"
 import fs from "fs/promises"
@@ -98,10 +99,11 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
     method: z.string().describe("The method to call on the tool (e.g., 'port_scan', 'test_injection')"),
     args: z.record(z.string(), z.unknown()).optional().describe("Arguments to pass to the method"),
   }),
-  async execute(params, _ctx): Promise<ToolResult> {
+  async execute(params, ctx): Promise<ToolResult> {
     const { tool: toolName, method, args = {} } = params
+    const sessionId = ctx.sessionID
 
-    log.info("invoking mcp tool", { toolName, method, args })
+    log.info("invoking mcp tool", { toolName, method, args, sessionId })
 
     // Get registry to find the image
     const registry = await getRegistry()
@@ -147,8 +149,8 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
       // Call the tool via container manager
       const result = await ContainerManager.callTool(toolName, toolDef.image, method, args as Record<string, unknown>)
 
-      // Format the result
-      let output = `# ${toolName}.${method} Result\n\n`
+      // Format the raw result
+      let rawOutput = ""
 
       if (typeof result === "object" && result !== null) {
         const r = result as Record<string, unknown>
@@ -157,19 +159,45 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
         if ("content" in r && Array.isArray(r.content)) {
           for (const item of r.content as Array<{ type: string; text?: string }>) {
             if (item.type === "text" && item.text) {
-              output += item.text + "\n"
+              rawOutput += item.text + "\n"
             }
           }
         } else {
-          output += "```json\n" + JSON.stringify(result, null, 2) + "\n```"
+          rawOutput = JSON.stringify(result, null, 2)
         }
       } else {
-        output += String(result)
+        rawOutput = String(result)
+      }
+
+      // Use OutputStore to handle large outputs
+      // This prevents context overflow by storing large outputs externally
+      // and returning a summary with a reference ID
+      const storeResult = await OutputStore.store({
+        sessionId,
+        toolName,
+        method,
+        content: rawOutput,
+        contentType: typeof result === "object" ? "json" : "text",
+      })
+
+      let output: string
+      if (storeResult.stored) {
+        // Large output was stored externally, return summary with reference
+        output = storeResult.output
+        log.info("large output stored externally", {
+          toolName,
+          method,
+          outputId: storeResult.reference?.id,
+          sizeBytes: storeResult.reference?.sizeBytes,
+        })
+      } else {
+        // Small output, return directly with header
+        output = `# ${toolName}.${method} Result\n\n${storeResult.output}`
       }
 
       return {
         output,
-        title: `${toolName}.${method}`,
+        title: `${toolName}.${method}${storeResult.stored ? " (output stored)" : ""}`,
         metadata: { tool: toolName, method, success: true },
       }
     } catch (error) {
