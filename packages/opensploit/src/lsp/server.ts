@@ -1809,7 +1809,7 @@ export namespace LSPServer {
       })
 
       if (!bin) {
-        if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
+        if (Flag.OPENSPLOIT_DISABLE_LSP_DOWNLOAD) return
         log.info("downloading tinymist from GitHub releases")
 
         const response = await fetch("https://api.github.com/repos/Myriad-Dreamin/tinymist/releases/latest")

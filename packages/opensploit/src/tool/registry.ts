@@ -24,6 +24,7 @@ import { CodeSearchTool } from "./codesearch"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
+import { ToolRegistrySearchTool } from "./tool-registry-search"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -105,6 +106,7 @@ export namespace ToolRegistry {
       WebSearchTool,
       CodeSearchTool,
       SkillTool,
+      ToolRegistrySearchTool,
       ...(Flag.OPENSPLOIT_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...custom,
