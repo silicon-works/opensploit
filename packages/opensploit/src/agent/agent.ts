@@ -471,7 +471,7 @@ export namespace Agent {
     }
 
     // Mark the default agent
-    const defaultName = cfg.default_agent ?? "build"
+    const defaultName = cfg.default_agent ?? "pentest"
     const defaultCandidate = result[defaultName]
     if (defaultCandidate && defaultCandidate.mode !== "subagent") {
       defaultCandidate.default = true
