@@ -25,6 +25,7 @@ import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
 import { ToolRegistrySearchTool } from "./tool-registry-search"
+import { McpToolInvoke } from "./mcp-tool"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -107,6 +108,7 @@ export namespace ToolRegistry {
       CodeSearchTool,
       SkillTool,
       ToolRegistrySearchTool,
+      McpToolInvoke,
       ...(Flag.OPENSPLOIT_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...custom,
