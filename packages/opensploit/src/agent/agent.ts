@@ -123,7 +123,7 @@ export namespace Agent {
     )
 
     // Pentest agents use restricted bash permissions
-    // DENY all security tools - they must use MCP tools instead
+    // DENY all security tools and code execution - they must use MCP tools instead
     const pentestBashPermissions = {
       // Explicitly DENY security tools (agents must use MCP tools)
       "nmap*": "deny",
@@ -152,11 +152,38 @@ export namespace Agent {
       "smbclient*": "deny",
       "rpcclient*": "deny",
       "impacket*": "deny",
-      "python*mcp*": "deny",
       "linpeas*": "deny",
       "winpeas*": "deny",
       "sudo *": "deny",
-      // Allow basic file system operations
+      // DENY compilers and code execution (prevents running custom exploits via bash)
+      "gcc*": "deny",
+      "g++*": "deny",
+      "cc *": "deny",
+      "clang*": "deny",
+      "make*": "deny",
+      "cmake*": "deny",
+      "./*": "deny", // block executing local binaries
+      "sh *": "deny",
+      "sh -c*": "deny",
+      "bash *": "deny",
+      "bash -c*": "deny",
+      "zsh *": "deny",
+      "python *": "deny",
+      "python2*": "deny",
+      "python3*": "deny",
+      "perl *": "deny",
+      "ruby *": "deny",
+      "node *": "deny",
+      "php *": "deny",
+      "java *": "deny",
+      "javac*": "deny",
+      "go run*": "deny",
+      "go build*": "deny",
+      "cargo *": "deny",
+      "rustc*": "deny",
+      "chmod +x*": "deny",
+      "chmod 7*": "deny",
+      // Allow basic file system operations (read-only mostly)
       "ls*": "allow",
       "pwd*": "allow",
       "cat *": "allow",
