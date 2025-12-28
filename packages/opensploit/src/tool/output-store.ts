@@ -4,6 +4,7 @@ import fs from "fs/promises"
 import { ulid } from "ulid"
 import { Log } from "../util/log"
 import { Token } from "../util/token"
+import { OutputIndexer, type OutputIndex } from "./output-indexer"
 
 const log = Log.create({ service: "tool.output-store" })
 
@@ -37,6 +38,11 @@ export interface StoredOutput {
   contentType: "text" | "json" | "binary"
   preview: string
   fullPath: string
+  indexed: boolean
+  indexInfo?: {
+    recordCount: number
+    types: string[]
+  }
 }
 
 export interface StoreResult {
@@ -62,35 +68,60 @@ export namespace OutputStore {
     content: string,
     toolName: string,
     method: string,
-    stored: StoredOutput
+    stored: StoredOutput,
+    indexSummary?: { total: number; byType: Record<string, number>; byStatus?: Record<string, number> }
   ): string {
-    const lines = content.split("\n")
-    const firstLines = lines.slice(0, 20).join("\n")
-    const lastLines = lines.length > 30 ? lines.slice(-10).join("\n") : ""
-
     let summary = `# ${toolName}.${method} Result\n\n`
-    summary += `**Output stored externally** - Full output is ${stored.sizeBytes.toLocaleString()} bytes (~${stored.sizeTokensEstimate.toLocaleString()} tokens)\n\n`
-    summary += `## Preview (first 20 lines)\n\n`
-    summary += "```\n"
-    summary += firstLines.slice(0, SUMMARY_PREVIEW_CHARS)
-    if (firstLines.length > SUMMARY_PREVIEW_CHARS) {
-      summary += "\n... [preview truncated]"
-    }
-    summary += "\n```\n\n"
+    summary += `**Output indexed for search** - ${stored.sizeBytes.toLocaleString()} bytes (~${stored.sizeTokensEstimate.toLocaleString()} tokens)\n\n`
 
-    if (lastLines) {
-      summary += `## Last 10 lines\n\n`
+    // If we have index summary, show structured info instead of raw preview
+    if (indexSummary && indexSummary.total > 0) {
+      summary += `## Indexed Records: ${indexSummary.total.toLocaleString()}\n\n`
+
+      // Show breakdown by type
+      summary += `**By Type:**\n`
+      for (const [type, count] of Object.entries(indexSummary.byType)) {
+        summary += `- ${type}: ${count.toLocaleString()}\n`
+      }
+      summary += "\n"
+
+      // Show breakdown by status if available
+      if (indexSummary.byStatus && Object.keys(indexSummary.byStatus).length > 0) {
+        summary += `**By Status:**\n`
+        const sortedStatuses = Object.entries(indexSummary.byStatus).sort(([a], [b]) => a.localeCompare(b))
+        for (const [status, count] of sortedStatuses) {
+          summary += `- ${status}: ${count.toLocaleString()}\n`
+        }
+        summary += "\n"
+      }
+
+      summary += `## How to Search\n\n`
+      summary += `Use \`read_tool_output\` with the reference ID and a search query:\n\n`
       summary += "```\n"
-      summary += lastLines.slice(0, 1000)
+      summary += `read_tool_output:\n`
+      summary += `  outputId: "${stored.id}"\n`
+      summary += `  search: "admin"           # Find paths containing "admin"\n`
+      summary += `  search: "status:200"      # Find 200 OK responses\n`
+      summary += `  search: "status:403"      # Find 403 Forbidden\n`
+      summary += "```\n\n"
+    } else {
+      // Fallback to preview for non-indexed outputs
+      const lines = content.split("\n")
+      const firstLines = lines.slice(0, 15).join("\n")
+
+      summary += `## Preview (first 15 lines)\n\n`
+      summary += "```\n"
+      summary += firstLines.slice(0, SUMMARY_PREVIEW_CHARS)
+      if (firstLines.length > SUMMARY_PREVIEW_CHARS) {
+        summary += "\n... [preview truncated]"
+      }
       summary += "\n```\n\n"
     }
 
-    summary += `## Output Reference\n\n`
-    summary += `- **Reference ID**: \`${stored.id}\`\n`
-    summary += `- **Lines**: ${stored.lineCount}\n`
+    summary += `## Reference\n\n`
+    summary += `- **ID**: \`${stored.id}\`\n`
+    summary += `- **Records**: ${stored.indexInfo?.recordCount ?? stored.lineCount}\n`
     summary += `- **Size**: ${stored.sizeBytes.toLocaleString()} bytes\n`
-    summary += `- **Estimated tokens**: ~${stored.sizeTokensEstimate.toLocaleString()}\n\n`
-    summary += `> To retrieve the full output or search within it, use the \`read_tool_output\` tool with reference ID \`${stored.id}\`\n`
 
     return summary
   }
@@ -134,6 +165,36 @@ export namespace OutputStore {
     const sizeBytes = Buffer.byteLength(content, "utf-8")
     const sizeTokensEstimate = Token.estimate(content)
 
+    // Index the output for RAG-based search
+    let indexInfo: OutputIndex | null = null
+    let indexSummary: { total: number; byType: Record<string, number>; byStatus?: Record<string, number> } | null = null
+
+    try {
+      indexInfo = await OutputIndexer.index({
+        sessionId,
+        outputId,
+        tool: toolName,
+        method,
+        content,
+      })
+
+      // Get summary statistics for the indexed data
+      indexSummary = await OutputIndexer.getSummary(outputId)
+
+      log.info("indexed output for RAG search", {
+        outputId,
+        toolName,
+        method,
+        recordCount: indexInfo.recordCount,
+        types: indexInfo.types,
+      })
+    } catch (error) {
+      log.warn("failed to index output, falling back to raw storage", {
+        outputId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
     const stored: StoredOutput = {
       id: outputId,
       sessionId,
@@ -146,6 +207,13 @@ export namespace OutputStore {
       contentType,
       preview: content.slice(0, 500),
       fullPath: outputPath,
+      indexed: indexInfo !== null,
+      indexInfo: indexInfo
+        ? {
+            recordCount: indexInfo.recordCount,
+            types: indexInfo.types,
+          }
+        : undefined,
     }
 
     // Write metadata
@@ -159,10 +227,11 @@ export namespace OutputStore {
       sizeBytes,
       sizeTokensEstimate,
       lineCount: lines.length,
+      indexed: stored.indexed,
     })
 
-    // Generate summary for the agent
-    const summary = generateSummary(content, toolName, method, stored)
+    // Generate summary for the agent (with index info if available)
+    const summary = generateSummary(content, toolName, method, stored, indexSummary ?? undefined)
 
     return {
       stored: true,

@@ -105,10 +105,14 @@ export namespace ContainerManager {
     log.info("image pulled successfully", { image })
   }
 
+  export interface ContainerOptions {
+    privileged?: boolean
+  }
+
   /**
    * Start a container and return an MCP client connected to it
    */
-  export async function getClient(toolName: string, image: string): Promise<Client> {
+  export async function getClient(toolName: string, image: string, options?: ContainerOptions): Promise<Client> {
     // Check if we already have a running container for this tool
     const existing = containers.get(toolName)
     if (existing) {
@@ -138,10 +142,18 @@ export namespace ContainerManager {
       version: Installation.VERSION,
     })
 
+    // Build docker run args based on options
+    const dockerArgs = ["run", "--rm", "-i", "--network=host"]
+    if (options?.privileged) {
+      dockerArgs.push("--privileged")
+      log.info("running container in privileged mode", { toolName, image })
+    }
+    dockerArgs.push(image)
+
     // Create stdio transport that will spawn docker run
     const stdioTransport = new StdioClientTransport({
       command: "docker",
-      args: ["run", "--rm", "-i", "--network=host", image],
+      args: dockerArgs,
       stderr: "pipe",
     })
 
@@ -263,9 +275,10 @@ export namespace ContainerManager {
     toolName: string,
     image: string,
     method: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
+    options?: ContainerOptions
   ): Promise<unknown> {
-    const client = await getClient(toolName, image)
+    const client = await getClient(toolName, image, options)
 
     // Update last used time
     const container = containers.get(toolName)

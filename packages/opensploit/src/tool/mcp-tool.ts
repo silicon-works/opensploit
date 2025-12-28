@@ -19,6 +19,10 @@ interface RegistryTool {
   name: string
   image?: string
   methods?: Record<string, { description: string; params?: Record<string, unknown> }>
+  requirements?: {
+    network?: boolean
+    privileged?: boolean
+  }
 }
 
 interface Registry {
@@ -147,7 +151,13 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
       }
 
       // Call the tool via container manager
-      const result = await ContainerManager.callTool(toolName, toolDef.image, method, args as Record<string, unknown>)
+      const result = await ContainerManager.callTool(
+        toolName,
+        toolDef.image,
+        method,
+        args as Record<string, unknown>,
+        { privileged: toolDef.requirements?.privileged ?? false }
+      )
 
       // Format the raw result
       let rawOutput = ""
