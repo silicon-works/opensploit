@@ -20,18 +20,19 @@ const CACHE_MAX_AGE_MS = 5 * 60 * 1000 // 5 minutes
 // =============================================================================
 
 // Tool routing rules - defines when to use/not use a tool
+// never_use_for can be either simple strings or detailed objects
+const NeverUseForItemSchema = z.union([
+  z.string(),
+  z.object({
+    task: z.string(),
+    use_instead: z.union([z.string(), z.array(z.string())]),
+    reason: z.string(),
+  }),
+])
+
 const RoutingRuleSchema = z.object({
   use_for: z.array(z.string()).optional().default([]),
-  never_use_for: z
-    .array(
-      z.object({
-        task: z.string(),
-        use_instead: z.union([z.string(), z.array(z.string())]),
-        reason: z.string(),
-      }),
-    )
-    .optional()
-    .default([]),
+  never_use_for: z.array(NeverUseForItemSchema).optional().default([]),
   triggers: z.array(z.string()).optional().default([]),
   prefer_over: z.array(z.string()).optional().default([]),
 })
@@ -132,15 +133,18 @@ interface ToolMethod {
   returns?: Record<string, any>
 }
 
-interface NeverUseForRule {
-  task: string
-  use_instead: string | string[]
-  reason: string
-}
+// NeverUseFor can be a simple string or a detailed object
+type NeverUseForItem =
+  | string
+  | {
+      task: string
+      use_instead: string | string[]
+      reason: string
+    }
 
 interface ToolRouting {
   use_for: string[]
-  never_use_for: NeverUseForRule[]
+  never_use_for: NeverUseForItem[]
   triggers: string[]
   prefer_over: string[]
 }
@@ -511,8 +515,10 @@ function checkAntiPatterns(tool: ToolEntry, query: string): string[] {
     return warnings
   }
 
-  for (const rule of tool.routing.never_use_for) {
-    const taskLower = rule.task.toLowerCase()
+  for (const item of tool.routing.never_use_for) {
+    // Handle both string and object formats
+    const task = typeof item === "string" ? item : item.task
+    const taskLower = task.toLowerCase()
     let matches = false
 
     // Check if query matches the anti-pattern task
@@ -528,8 +534,14 @@ function checkAntiPatterns(tool: ToolEntry, query: string): string[] {
     }
 
     if (matches) {
-      const alternatives = Array.isArray(rule.use_instead) ? rule.use_instead.join(", ") : rule.use_instead
-      warnings.push(`WARNING: ${tool.name} is NOT recommended for "${rule.task}". Use ${alternatives} instead. Reason: ${rule.reason}`)
+      if (typeof item === "string") {
+        // Simple string format - just warn about the task
+        warnings.push(`WARNING: ${tool.name} is NOT recommended for "${task}".`)
+      } else {
+        // Detailed object format - include alternatives and reason
+        const alternatives = Array.isArray(item.use_instead) ? item.use_instead.join(", ") : item.use_instead
+        warnings.push(`WARNING: ${tool.name} is NOT recommended for "${task}". Use ${alternatives} instead. Reason: ${item.reason}`)
+      }
     }
   }
 
