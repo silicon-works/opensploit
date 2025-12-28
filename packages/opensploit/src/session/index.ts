@@ -16,6 +16,7 @@ import { SessionPrompt } from "./prompt"
 import { fn } from "@/util/fn"
 import { Command } from "../command"
 import { Snapshot } from "@/snapshot"
+import { cleanupSessionHosts } from "@/tool/hosts"
 
 import type { Provider } from "@/provider/provider"
 
@@ -301,6 +302,8 @@ export namespace Session {
         await remove(child.id)
       }
       await unshare(sessionID).catch(() => {})
+      // Clean up any hosts entries for this session
+      await cleanupSessionHosts(sessionID).catch(() => {})
       for (const msg of await Storage.list(["message", sessionID])) {
         for (const part of await Storage.list(["part", msg.at(-1)!])) {
           await Storage.remove(part)

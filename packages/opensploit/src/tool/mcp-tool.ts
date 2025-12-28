@@ -3,12 +3,18 @@ import { Tool } from "./tool"
 import { ContainerManager } from "../container"
 import { Log } from "../util/log"
 import { OutputStore } from "./output-store"
+import { TargetValidation } from "./target-validation"
+import { Permission } from "../permission"
+import { PhaseGating } from "./phase-gating"
 import path from "path"
 import os from "os"
 import fs from "fs/promises"
 import yaml from "js-yaml"
 
 const log = Log.create({ service: "tool.mcp" })
+
+// Common parameter names that contain targets
+const TARGET_PARAM_NAMES = ["target", "host", "hostname", "url", "ip", "address", "target_host", "rhost", "rhosts"]
 
 // Registry cache (shared with tool-registry-search.ts)
 const REGISTRY_URL = "https://opensploit.ai/registry.yaml"
@@ -18,10 +24,18 @@ const REGISTRY_PATH = path.join(REGISTRY_DIR, "registry.yaml")
 interface RegistryTool {
   name: string
   image?: string
+  // Local MCP server configuration (for tools like Burp)
+  local?: {
+    host: string
+    port: number
+    setup_url?: string
+    setup_instructions?: string
+  }
   methods?: Record<string, { description: string; params?: Record<string, unknown> }>
   requirements?: {
     network?: boolean
     privileged?: boolean
+    local_only?: boolean  // Cannot run in Docker
   }
 }
 
@@ -32,6 +46,68 @@ interface Registry {
 let cachedRegistry: Registry | null = null
 let cacheTimestamp = 0
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000
+
+/**
+ * Call a local MCP server via HTTP
+ */
+async function callLocalMcpServer(
+  host: string,
+  port: number,
+  method: string,
+  args: Record<string, unknown>
+): Promise<unknown> {
+  const url = `http://${host}:${port}`
+
+  // MCP over HTTP uses JSON-RPC style requests
+  const request = {
+    jsonrpc: "2.0",
+    id: Date.now(),
+    method: "tools/call",
+    params: {
+      name: method,
+      arguments: args,
+    },
+  }
+
+  log.info("calling local MCP server", { url, method })
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(request),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Local MCP server returned ${response.status}: ${response.statusText}`)
+  }
+
+  const result = await response.json()
+
+  if (result.error) {
+    throw new Error(result.error.message || "Local MCP server error")
+  }
+
+  return result.result
+}
+
+/**
+ * Check if a local MCP server is available
+ */
+async function isLocalMcpServerAvailable(host: string, port: number): Promise<boolean> {
+  try {
+    const response = await fetch(`http://${host}:${port}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+      signal: AbortSignal.timeout(2000),
+    })
+    return response.ok || response.status === 400 // 400 might be method not found, but server is running
+  } catch {
+    return false
+  }
+}
 
 async function getRegistry(): Promise<Registry> {
   const now = Date.now()
@@ -121,11 +197,12 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
       }
     }
 
-    if (!toolDef.image) {
+    // Check if tool has either Docker image or local server config
+    if (!toolDef.image && !toolDef.local) {
       return {
-        output: `Tool "${toolName}" does not have a Docker image configured.\n\nThis tool may not be available yet.`,
-        title: `Error: No image`,
-        metadata: { tool: toolName, method, success: false, error: "No Docker image" },
+        output: `Tool "${toolName}" does not have a Docker image or local server configured.\n\nThis tool may not be available yet.`,
+        title: `Error: No configuration`,
+        metadata: { tool: toolName, method, success: false, error: "No Docker image or local server" },
       }
     }
 
@@ -140,24 +217,115 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
     }
 
     try {
-      // Check Docker availability first
-      const dockerAvailable = await ContainerManager.isDockerAvailable()
-      if (!dockerAvailable) {
-        return {
-          output: `Docker is not available.\n\nPlease ensure Docker is installed and running:\n  - Install Docker: https://docs.docker.com/get-docker/\n  - Start Docker daemon\n  - Verify with: docker info`,
-          title: `Error: Docker not available`,
-          metadata: { tool: toolName, method, success: false, error: "Docker not available" },
+      // Validate targets in args
+      let targetWarning = ""
+      for (const paramName of TARGET_PARAM_NAMES) {
+        const value = args[paramName]
+        if (typeof value === "string" && value) {
+          const validation = TargetValidation.validateTarget(value)
+
+          // Warn about high-risk targets (government, military, educational) but do NOT block
+          if (validation.highRisk && !targetWarning) {
+            targetWarning = `${validation.highRiskWarning}\n\n`
+            log.warn("high-risk target detected", { toolName, method, target: value, category: validation.highRiskWarning })
+          }
+          // Warn about external targets
+          else if (validation.info.isExternal && !targetWarning) {
+            targetWarning = `⚠️  EXTERNAL TARGET: ${value}\nType: ${validation.info.type.toUpperCase()}\nEnsure you have authorization to scan this target.\n\n`
+            log.warn("external target detected", { toolName, method, target: value, type: validation.info.type })
+          }
         }
       }
 
-      // Call the tool via container manager
-      const result = await ContainerManager.callTool(
-        toolName,
-        toolDef.image,
-        method,
-        args as Record<string, unknown>,
-        { privileged: toolDef.requirements?.privileged ?? false }
-      )
+      // Check phase gating
+      const phaseCheck = PhaseGating.checkToolInvocation(sessionId, toolName)
+      let phaseWarning = ""
+      if (phaseCheck.warning) {
+        phaseWarning = phaseCheck.warning + "\n\n"
+      }
+
+      // Check if privileged mode requires approval
+      const requiresPrivileged = toolDef.requirements?.privileged ?? false
+      if (requiresPrivileged) {
+        try {
+          await Permission.ask({
+            type: "privileged_container",
+            title: `Run ${toolName} in privileged mode?`,
+            pattern: `container:${toolName}:privileged`,
+            sessionID: ctx.sessionID,
+            messageID: ctx.messageID,
+            callID: ctx.callID,
+            metadata: {
+              tool: toolName,
+              method,
+              reason: "This tool requires raw socket access for network operations (e.g., SYN scans, OS detection)",
+              image: toolDef.image,
+            },
+          })
+        } catch (error) {
+          if (error instanceof Permission.RejectedError) {
+            return {
+              output: `⛔ PRIVILEGED MODE DENIED\n\nThe tool "${toolName}" requires privileged container access for:\n- Raw socket access (SYN scans, packet manipulation)\n- OS detection\n- Low-level network operations\n\nYou can approve this request to continue.`,
+              title: `Blocked: Privileged access denied`,
+              metadata: { tool: toolName, method, success: false, error: "Privileged access denied" },
+            }
+          }
+          throw error
+        }
+      }
+
+      // Determine if we should use local server or Docker
+      let result: unknown
+      let usedLocal = false
+
+      if (toolDef.local) {
+        // Try local MCP server first (e.g., Burp Suite)
+        const { host, port, setup_url, setup_instructions } = toolDef.local
+        const available = await isLocalMcpServerAvailable(host, port)
+
+        if (available) {
+          log.info("using local MCP server", { toolName, host, port })
+          result = await callLocalMcpServer(host, port, method, args as Record<string, unknown>)
+          usedLocal = true
+        } else if (toolDef.requirements?.local_only) {
+          // This tool can only run locally (no Docker fallback)
+          return {
+            output: `⚠️  LOCAL MCP SERVER NOT AVAILABLE\n\nTool "${toolName}" requires a local MCP server at ${host}:${port}.\n\nSetup instructions:\n${setup_instructions || `See ${setup_url || "tool documentation"} for setup instructions.`}\n\nEnsure the MCP server is running and accessible.`,
+            title: `Error: Local server not available`,
+            metadata: { tool: toolName, method, success: false, error: "Local server not available" },
+          }
+        }
+        // Fall through to Docker if local not available and Docker fallback exists
+      }
+
+      if (!usedLocal) {
+        // Use Docker container
+        if (!toolDef.image) {
+          return {
+            output: `Tool "${toolName}" requires a local MCP server which is not running.\n\nNo Docker fallback available.`,
+            title: `Error: No server available`,
+            metadata: { tool: toolName, method, success: false, error: "No server available" },
+          }
+        }
+
+        const dockerAvailable = await ContainerManager.isDockerAvailable()
+        if (!dockerAvailable) {
+          return {
+            output: `Docker is not available.\n\nPlease ensure Docker is installed and running:\n  - Install Docker: https://docs.docker.com/get-docker/\n  - Start Docker daemon\n  - Verify with: docker info`,
+            title: `Error: Docker not available`,
+            metadata: { tool: toolName, method, success: false, error: "Docker not available" },
+          }
+        }
+
+        // Call the tool via container manager
+        result = await ContainerManager.callTool(
+          toolName,
+          toolDef.image,
+          method,
+          args as Record<string, unknown>,
+          { privileged: toolDef.requirements?.privileged ?? false }
+        )
+      }
 
       // Format the raw result
       let rawOutput = ""
@@ -191,9 +359,10 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
       })
 
       let output: string
+      const warnings = phaseWarning + targetWarning
       if (storeResult.stored) {
         // Large output was stored externally, return summary with reference
-        output = storeResult.output
+        output = warnings + storeResult.output
         log.info("large output stored externally", {
           toolName,
           method,
@@ -202,7 +371,7 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
         })
       } else {
         // Small output, return directly with header
-        output = `# ${toolName}.${method} Result\n\n${storeResult.output}`
+        output = `${warnings}# ${toolName}.${method} Result\n\n${storeResult.output}`
       }
 
       return {

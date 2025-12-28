@@ -15,6 +15,7 @@ import { fileURLToPath } from "url"
 import { Flag } from "@/flag/flag.ts"
 import path from "path"
 import { Shell } from "@/shell/shell"
+import { AntiPattern } from "./anti-pattern"
 
 const MAX_OUTPUT_LENGTH = Flag.OPENSPLOIT_EXPERIMENTAL_BASH_MAX_OUTPUT_LENGTH || 30_000
 const DEFAULT_TIMEOUT = Flag.OPENSPLOIT_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -81,6 +82,24 @@ export const BashTool = Tool.define("bash", async () => {
       if (!tree) {
         throw new Error("Failed to parse command")
       }
+
+      // Check for anti-patterns (security tools via bash) - BLOCK these
+      // Agents must use MCP tools, not bash, for security operations
+      const antiPatterns = AntiPattern.checkBashCommand(params.command)
+      if (AntiPattern.hasBlockingErrors(antiPatterns)) {
+        const formatted = AntiPattern.formatDetections(antiPatterns)
+        const blockedOutput = `${formatted}\nThis command was blocked because security tools must be run via MCP, not bash.\n\nOpenSploit architecture requires using mcp_tool for all security operations:\n1. Use tool_registry_search to find the appropriate MCP tool\n2. Use mcp_tool to invoke it\n\nMCP tools provide:\n- Isolated Docker containers\n- Proper logging and audit trails\n- Session-aware output storage\n- Phase tracking and methodology guidance`
+        return {
+          title: "Security tool blocked - use MCP instead",
+          output: blockedOutput,
+          metadata: {
+            output: blockedOutput,
+            exit: 1,
+            description: "Security tool blocked - use MCP instead",
+          },
+        }
+      }
+
       const agent = await Agent.get(ctx.agent)
 
       const checkExternalDirectory = async (dir: string) => {
