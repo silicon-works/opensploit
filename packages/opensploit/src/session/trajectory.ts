@@ -3,6 +3,11 @@
  *
  * A trajectory is a complete sequence of TVAR (Thought-Verify-Action-Result) steps
  * from a penetration testing session, suitable for fine-tuning LLMs.
+ *
+ * Supports:
+ * - Anonymization of IPs, hostnames, and credentials (REQ-TRN-003)
+ * - Outcome tracking for quality filtering (REQ-TRN-004)
+ * - Anti-pattern detection for negative training (REQ-TRN-030)
  */
 
 import { MessageV2 } from "./message-v2"
@@ -11,6 +16,25 @@ import { Storage } from "@/storage/storage"
 import { Identifier } from "@/id/id"
 
 export namespace Trajectory {
+  /**
+   * Anonymization options
+   */
+  export interface AnonymizeOptions {
+    enabled?: boolean
+    ipMapping?: Map<string, string>
+    hostnameMapping?: Map<string, string>
+  }
+
+  /**
+   * Anti-pattern detection for negative training data
+   */
+  export interface AntiPattern {
+    step: number
+    issue: string
+    badAction: string
+    correctAction?: string
+    category: "wrong_tool" | "phase_violation" | "custom_code" | "manual_exploitation"
+  }
   /**
    * A single step in the trajectory
    */
@@ -46,7 +70,143 @@ export namespace Trajectory {
       flagsCaptured?: string[]
       notes?: string
     }
+    antiPatterns?: AntiPattern[]
     metadata?: Record<string, unknown>
+  }
+
+  // IP address regex patterns
+  const IPV4_PATTERN = /\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/g
+  const HOSTNAME_PATTERN = /\b([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b/g
+  const CREDENTIAL_PATTERN = /(?:password|passwd|pwd|secret|key|token|credential)[\s:=]+["']?([^"'\s]+)["']?/gi
+
+  /**
+   * Anonymize text by replacing IPs, hostnames, and credentials
+   */
+  export function anonymizeText(text: string, options: AnonymizeOptions = {}): string {
+    if (!options.enabled) return text
+
+    let result = text
+    const ipMap = options.ipMapping || new Map<string, string>()
+    const hostMap = options.hostnameMapping || new Map<string, string>()
+
+    // Replace IP addresses
+    let ipCounter = 1
+    result = result.replace(IPV4_PATTERN, (match) => {
+      if (!ipMap.has(match)) {
+        ipMap.set(match, `10.10.10.${ipCounter++}`)
+      }
+      return ipMap.get(match)!
+    })
+
+    // Replace hostnames (but not common domains like github.com)
+    const commonDomains = ["github.com", "google.com", "localhost", "htb", "hackthebox.com"]
+    result = result.replace(HOSTNAME_PATTERN, (match) => {
+      const lowerMatch = match.toLowerCase()
+      if (commonDomains.some((d) => lowerMatch.includes(d))) return match
+      if (!hostMap.has(match)) {
+        hostMap.set(match, `target${hostMap.size + 1}.htb`)
+      }
+      return hostMap.get(match)!
+    })
+
+    // Redact credentials
+    result = result.replace(CREDENTIAL_PATTERN, (match, value) => {
+      return match.replace(value, "[REDACTED]")
+    })
+
+    return result
+  }
+
+  /**
+   * Anonymize an entire trajectory
+   */
+  export function anonymize(trajectory: Data): Data {
+    const options: AnonymizeOptions = {
+      enabled: true,
+      ipMapping: new Map(),
+      hostnameMapping: new Map(),
+    }
+
+    const anonymizedSteps = trajectory.trajectory.map((step) => ({
+      ...step,
+      thought: anonymizeText(step.thought, options),
+      verify: anonymizeText(step.verify, options),
+      action: step.action ? anonymizeText(step.action, options) : undefined,
+      result: step.result ? anonymizeText(step.result, options) : undefined,
+    }))
+
+    return {
+      ...trajectory,
+      target: trajectory.target ? anonymizeText(trajectory.target, options) : undefined,
+      trajectory: anonymizedSteps,
+    }
+  }
+
+  /**
+   * Detect anti-patterns in trajectory for negative training data
+   */
+  export function detectAntiPatterns(trajectory: Data): AntiPattern[] {
+    const antiPatterns: AntiPattern[] = []
+
+    for (const step of trajectory.trajectory) {
+      const combined = `${step.thought} ${step.verify} ${step.action || ""}`.toLowerCase()
+
+      // Detect wrong tool usage
+      if (combined.includes("curl") && (combined.includes("sql") || combined.includes("injection"))) {
+        antiPatterns.push({
+          step: step.step,
+          issue: "Using curl for SQL injection testing instead of sqlmap",
+          badAction: "curl with SQL payload",
+          correctAction: "sqlmap.test_form",
+          category: "wrong_tool",
+        })
+      }
+
+      if (combined.includes("curl") && combined.includes("brute") && combined.includes("force")) {
+        antiPatterns.push({
+          step: step.step,
+          issue: "Using curl for brute force instead of hydra",
+          badAction: "curl loop for credential testing",
+          correctAction: "hydra.brute_force",
+          category: "wrong_tool",
+        })
+      }
+
+      // Detect custom code patterns
+      if (combined.includes("python") && (combined.includes("exploit") || combined.includes("payload"))) {
+        antiPatterns.push({
+          step: step.step,
+          issue: "Writing custom exploit code instead of using MCP tools",
+          badAction: "Custom Python exploit",
+          correctAction: "exploit-runner or searchsploit",
+          category: "custom_code",
+        })
+      }
+
+      // Detect phase violations
+      if (step.phase === "reconnaissance" && (combined.includes("sqlmap") || combined.includes("exploit"))) {
+        antiPatterns.push({
+          step: step.step,
+          issue: "Using exploitation tools during reconnaissance phase",
+          badAction: step.toolCall?.tool || "exploitation tool",
+          correctAction: "Complete reconnaissance first",
+          category: "phase_violation",
+        })
+      }
+
+      // Detect manual exploitation
+      if (combined.includes("manual") && combined.includes("exploit")) {
+        antiPatterns.push({
+          step: step.step,
+          issue: "Attempting manual exploitation instead of using MCP tools",
+          badAction: "Manual exploitation",
+          correctAction: "Use appropriate MCP tool (sqlmap, hydra, metasploit)",
+          category: "manual_exploitation",
+        })
+      }
+    }
+
+    return antiPatterns
   }
 
   /**

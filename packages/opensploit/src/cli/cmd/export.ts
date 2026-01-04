@@ -21,6 +21,16 @@ export const ExportCommand = cmd({
         choices: ["json", "trajectory", "jsonl", "sharegpt"] as const,
         default: "json" as const,
       })
+      .option("anonymize", {
+        describe: "anonymize IPs, hostnames, and credentials for training data",
+        type: "boolean",
+        default: false,
+      })
+      .option("detect-anti-patterns", {
+        describe: "detect anti-patterns for negative training data",
+        type: "boolean",
+        default: false,
+      })
   },
   handler: async (args) => {
     await bootstrap(process.cwd(), async () => {
@@ -92,7 +102,7 @@ export const ExportCommand = cmd({
           process.stdout.write(EOL)
         } else if (format === "trajectory" || format === "jsonl" || format === "sharegpt") {
           // Trajectory-based exports for training data
-          const trajectory = await Trajectory.fromSession(sessionID!)
+          let trajectory = await Trajectory.fromSession(sessionID!)
 
           if (!trajectory || trajectory.trajectory.length === 0) {
             UI.error("No TVAR reasoning found in session. Ensure the pentest agent was used.")
@@ -100,6 +110,21 @@ export const ExportCommand = cmd({
           }
 
           process.stderr.write(`\nFound ${trajectory.trajectory.length} TVAR steps\n`)
+
+          // Apply anonymization if requested
+          if (args.anonymize) {
+            trajectory = Trajectory.anonymize(trajectory)
+            process.stderr.write("Applied anonymization to trajectory\n")
+          }
+
+          // Detect anti-patterns if requested
+          if (args["detect-anti-patterns"]) {
+            const antiPatterns = Trajectory.detectAntiPatterns(trajectory)
+            trajectory.antiPatterns = antiPatterns
+            if (antiPatterns.length > 0) {
+              process.stderr.write(`Detected ${antiPatterns.length} anti-patterns for negative training\n`)
+            }
+          }
 
           if (format === "trajectory") {
             // Full trajectory JSON
