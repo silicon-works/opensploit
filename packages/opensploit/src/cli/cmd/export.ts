@@ -109,6 +109,14 @@ export const ExportCommand = cmd({
             process.exit(1)
           }
 
+          // Merge with saved trajectory data (outcome, metadata)
+          const savedTrajectory = await Trajectory.load(sessionID!)
+          if (savedTrajectory) {
+            trajectory.outcome = savedTrajectory.outcome
+            trajectory.metadata = savedTrajectory.metadata
+            trajectory.antiPatterns = savedTrajectory.antiPatterns
+          }
+
           process.stderr.write(`\nFound ${trajectory.trajectory.length} TVAR steps\n`)
 
           // Apply anonymization if requested
