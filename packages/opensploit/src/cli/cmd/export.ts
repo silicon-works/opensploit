@@ -1,5 +1,6 @@
 import type { Argv } from "yargs"
 import { Session } from "../../session"
+import { Trajectory } from "../../session/trajectory"
 import { cmd } from "./cmd"
 import { bootstrap } from "../bootstrap"
 import { UI } from "../ui"
@@ -10,10 +11,16 @@ export const ExportCommand = cmd({
   command: "export [sessionID]",
   describe: "export session data as JSON",
   builder: (yargs: Argv) => {
-    return yargs.positional("sessionID", {
-      describe: "session id to export",
-      type: "string",
-    })
+    return yargs
+      .positional("sessionID", {
+        describe: "session id to export",
+        type: "string",
+      })
+      .option("format", {
+        describe: "export format",
+        choices: ["json", "trajectory", "jsonl", "sharegpt"] as const,
+        default: "json" as const,
+      })
   },
   handler: async (args) => {
     await bootstrap(process.cwd(), async () => {
@@ -66,19 +73,46 @@ export const ExportCommand = cmd({
       }
 
       try {
-        const sessionInfo = await Session.get(sessionID!)
-        const messages = await Session.messages({ sessionID: sessionID! })
+        const format = args.format ?? "json"
 
-        const exportData = {
-          info: sessionInfo,
-          messages: messages.map((msg) => ({
-            info: msg.info,
-            parts: msg.parts,
-          })),
+        if (format === "json") {
+          // Original JSON export
+          const sessionInfo = await Session.get(sessionID!)
+          const messages = await Session.messages({ sessionID: sessionID! })
+
+          const exportData = {
+            info: sessionInfo,
+            messages: messages.map((msg) => ({
+              info: msg.info,
+              parts: msg.parts,
+            })),
+          }
+
+          process.stdout.write(JSON.stringify(exportData, null, 2))
+          process.stdout.write(EOL)
+        } else if (format === "trajectory" || format === "jsonl" || format === "sharegpt") {
+          // Trajectory-based exports for training data
+          const trajectory = await Trajectory.fromSession(sessionID!)
+
+          if (!trajectory || trajectory.trajectory.length === 0) {
+            UI.error("No TVAR reasoning found in session. Ensure the pentest agent was used.")
+            process.exit(1)
+          }
+
+          process.stderr.write(`\nFound ${trajectory.trajectory.length} TVAR steps\n`)
+
+          if (format === "trajectory") {
+            // Full trajectory JSON
+            process.stdout.write(JSON.stringify(trajectory, null, 2))
+          } else if (format === "jsonl") {
+            // JSONL for fine-tuning
+            process.stdout.write(Trajectory.toJSONL(trajectory))
+          } else if (format === "sharegpt") {
+            // ShareGPT format
+            process.stdout.write(Trajectory.toShareGPT(trajectory))
+          }
+          process.stdout.write(EOL)
         }
-
-        process.stdout.write(JSON.stringify(exportData, null, 2))
-        process.stdout.write(EOL)
       } catch (error) {
         UI.error(`Session not found: ${sessionID!}`)
         process.exit(1)
