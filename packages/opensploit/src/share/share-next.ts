@@ -97,7 +97,7 @@ export namespace ShareNext {
       }
     | {
         type: "part"
-        data: SDK.Part
+        data: MessageV2.Part
       }
     | {
         type: "session_diff"

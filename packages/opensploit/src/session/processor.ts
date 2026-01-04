@@ -13,6 +13,7 @@ import { Plugin } from "@/plugin"
 import type { Provider } from "@/provider/provider"
 import { LLM } from "./llm"
 import { Config } from "@/config/config"
+import { parseTVAR, extractPhase } from "./tvar-parser"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -326,6 +327,32 @@ export namespace SessionProcessor {
                     }
                     if (value.providerMetadata) currentText.metadata = value.providerMetadata
                     await Session.updatePart(currentText)
+
+                    // Parse TVAR blocks from text output and create TVARPart entries
+                    const tvarBlocks = parseTVAR(currentText.text)
+                    for (const block of tvarBlocks) {
+                      const tvarPart: MessageV2.TVARPart = {
+                        id: Identifier.ascending("part"),
+                        messageID: input.assistantMessage.id,
+                        sessionID: input.assistantMessage.sessionID,
+                        type: "tvar",
+                        thought: block.thought,
+                        verify: block.verify,
+                        action: block.action,
+                        result: block.result,
+                        phase: extractPhase(block),
+                        time: {
+                          start: currentText.time?.start ?? Date.now(),
+                          end: Date.now(),
+                        },
+                      }
+                      await Session.updatePart(tvarPart)
+                      log.info("tvar_parsed", {
+                        phase: tvarPart.phase,
+                        hasAction: !!block.action,
+                        hasResult: !!block.result,
+                      })
+                    }
                   }
                   currentText = undefined
                   break
