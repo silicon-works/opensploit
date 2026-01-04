@@ -371,7 +371,7 @@ export namespace Agent {
       "pentest/exploit": {
         name: "pentest/exploit",
         description:
-          "Exploitation phase subagent. Tests and validates vulnerabilities through controlled exploitation. Can write custom exploits and delegate research.",
+          "Exploitation phase subagent. Tests and validates vulnerabilities using MCP tools. Delegates CVE research to general agent.",
         mode: "subagent",
         native: true,
         color: "#e74c3c",

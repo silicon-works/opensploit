@@ -65,17 +65,26 @@ const parsers: Record<string, Record<string, OutputParser>> = {
   ffuf: {
     dir_fuzz: parseFfufOutput,
     vhost_fuzz: parseFfufOutput,
+    param_fuzz: parseFfufOutput,
+    fuzz: parseFfufOutput, // generic fuzz method
+    vhost_discover: parseFfufOutput, // alias
+    "*": parseFfufOutput, // fallback for any ffuf method
   },
   nmap: {
     port_scan: parseNmapOutput,
     service_scan: parseNmapOutput,
     vuln_scan: parseNmapVulnOutput,
+    scan: parseNmapOutput,
+    quick_scan: parseNmapOutput,
+    "*": parseNmapOutput, // fallback for any nmap method
   },
   nikto: {
     scan: parseNiktoOutput,
+    "*": parseNiktoOutput,
   },
   gobuster: {
     dir: parseGobusterOutput,
+    "*": parseGobusterOutput,
   },
 }
 
@@ -86,6 +95,7 @@ function parseFfufOutput(output: string, tool: string, method: string): ParsedRe
   const records: ParsedRecord[] = []
   const lines = output.split("\n")
   const timestamp = Date.now()
+  const isVhost = method.includes("vhost") || method.includes("host")
 
   // ffuf output format: URL [Status: XXX, Size: XXX, Words: XXX, Lines: XXX]
   // Or JSON format
@@ -93,29 +103,65 @@ function parseFfufOutput(output: string, tool: string, method: string): ParsedRe
     const line = lines[i].trim()
     if (!line) continue
 
-    // Try to parse as structured line
+    // Try to parse as structured line with full URL
     const match = line.match(
       /^(https?:\/\/[^\s]+)\s+\[Status:\s*(\d+),\s*Size:\s*(\d+)(?:,\s*Words:\s*(\d+))?(?:,\s*Lines:\s*(\d+))?\]/i
     )
 
     if (match) {
       const [, url, status, size, words, lineCount] = match
-      const urlPath = new URL(url).pathname
+      let urlPath: string
+      let host: string | null = null
+      try {
+        const parsed = new URL(url)
+        urlPath = parsed.pathname
+        host = parsed.hostname
+      } catch {
+        urlPath = url
+      }
 
+      const recordType = isVhost ? "vhost" : "directory"
       records.push({
         id: `${tool}-${method}-${i}`,
         tool,
         method,
-        type: "directory",
+        type: recordType,
         data: {
           url,
           path: urlPath,
+          host,
+          vhost: host, // alias for vhost searches
           status: parseInt(status),
           size: parseInt(size),
           words: words ? parseInt(words) : null,
           lines: lineCount ? parseInt(lineCount) : null,
         },
-        text: `${urlPath} status:${status} size:${size}`,
+        text: `${host || urlPath} status:${status} size:${size} ${host ? `vhost:${host}` : ""}`,
+        timestamp,
+      })
+      continue
+    }
+
+    // Vhost format: hostname [Status: XXX, Size: XXX, ...]
+    const vhostMatch = line.match(
+      /^([a-zA-Z0-9][-a-zA-Z0-9.]*)\s+\[Status:\s*(\d+),\s*Size:\s*(\d+)(?:,\s*Words:\s*(\d+))?(?:,\s*Lines:\s*(\d+))?\]/i
+    )
+    if (vhostMatch) {
+      const [, hostname, status, size, words, lineCount] = vhostMatch
+      records.push({
+        id: `${tool}-${method}-${i}`,
+        tool,
+        method,
+        type: "vhost",
+        data: {
+          host: hostname,
+          vhost: hostname,
+          status: parseInt(status),
+          size: parseInt(size),
+          words: words ? parseInt(words) : null,
+          lines: lineCount ? parseInt(lineCount) : null,
+        },
+        text: `${hostname} status:${status} size:${size} vhost:${hostname}`,
         timestamp,
       })
       continue
@@ -144,14 +190,19 @@ function parseFfufOutput(output: string, tool: string, method: string): ParsedRe
     try {
       if (line.startsWith("{")) {
         const json = JSON.parse(line)
-        if (json.url || json.input) {
+        if (json.url || json.input || json.host) {
+          const host = json.host || json.input?.FUZZ || json.input?.HOST || null
           records.push({
             id: `${tool}-${method}-${i}`,
             tool,
             method,
-            type: "directory",
-            data: json,
-            text: `${json.url || json.input?.FUZZ || ""} status:${json.status || ""} size:${json.length || json.size || ""}`,
+            type: isVhost || host ? "vhost" : "directory",
+            data: {
+              ...json,
+              host,
+              vhost: host,
+            },
+            text: `${json.url || host || json.input?.FUZZ || ""} status:${json.status || ""} size:${json.length || json.size || ""} ${host ? `vhost:${host}` : ""}`,
             timestamp,
           })
         }
@@ -365,8 +416,8 @@ export namespace OutputIndexer {
   }): Promise<OutputIndex> {
     const { sessionId, outputId, tool, method, content } = input
 
-    // Get appropriate parser
-    const parser = parsers[tool]?.[method] || genericParser
+    // Get appropriate parser (check specific method, then tool wildcard, then generic)
+    const parser = parsers[tool]?.[method] || parsers[tool]?.["*"] || genericParser
 
     // Parse output into records
     const records = parser(content, tool, method)
