@@ -33,9 +33,8 @@ export namespace Permission {
       time: z.object({
         created: z.number(),
       }),
-      // For bubbled permissions from sub-agents
-      sourceSessionID: z.string().optional(), // Original sub-agent session
-      rootSessionID: z.string().optional(), // Root session for bubbling
+      // For sub-agent permissions (display context only)
+      sourceSessionID: z.string().optional(), // Original sub-agent session (if different from sessionID)
       agentName: z.string().optional(), // Name of the sub-agent
     })
     .meta({
@@ -103,30 +102,27 @@ export namespace Permission {
   }) {
     const { pending, approved } = state()
 
-    // Check if this is from a child session and get the root session
-    const isChildSession = hasParent(input.sessionID)
-    const rootSessionID = getRootSession(input.sessionID)
+    // Sub-agents use root session for permissions - simple delegation
+    const effectiveSessionID = getRootSession(input.sessionID)
+    const isSubAgent = effectiveSessionID !== input.sessionID
 
     log.info("asking", {
       sessionID: input.sessionID,
-      messageID: input.messageID,
-      toolCallID: input.callID,
+      effectiveSessionID,
+      isSubAgent,
       pattern: input.pattern,
-      isChildSession,
-      rootSessionID,
     })
 
-    // Check approvals for both the original session and root session
-    const approvedForSession = approved[input.sessionID] || {}
-    const approvedForRoot = approved[rootSessionID] || {}
+    // Check approvals against the effective session (root for sub-agents)
+    const approvedForSession = approved[effectiveSessionID] || {}
     const keys = toKeys(input.pattern, input.type)
-    if (covered(keys, approvedForSession) || covered(keys, approvedForRoot)) return
+    if (covered(keys, approvedForSession)) return
 
     const info: Info = {
       id: Identifier.ascending("permission"),
       type: input.type,
       pattern: input.pattern,
-      sessionID: input.sessionID,
+      sessionID: effectiveSessionID, // Use root session for sub-agents
       messageID: input.messageID,
       callID: input.callID,
       title: input.title,
@@ -134,9 +130,8 @@ export namespace Permission {
       time: {
         created: Date.now(),
       },
-      // Add bubbling metadata
-      sourceSessionID: isChildSession ? input.sessionID : undefined,
-      rootSessionID: isChildSession ? rootSessionID : undefined,
+      // Track original session for context (display only)
+      sourceSessionID: isSubAgent ? input.sessionID : undefined,
       agentName: input.agentName,
     }
 
@@ -151,35 +146,11 @@ export namespace Permission {
         return
     }
 
-    // Store under the original session (for tool result routing)
-    pending[input.sessionID] = pending[input.sessionID] || {}
-
-    // If this is a child session, also store under root session for unified approval queue
-    if (isChildSession) {
-      pending[rootSessionID] = pending[rootSessionID] || {}
-    }
+    // Store under effective session only - no dual storage
+    pending[effectiveSessionID] = pending[effectiveSessionID] || {}
 
     return new Promise<void>((resolve, reject) => {
-      const entry = {
-        info,
-        resolve,
-        reject,
-      }
-
-      // Store under original session
-      pending[input.sessionID][info.id] = entry
-
-      // If child session, also store under root session with same ID
-      // This allows the root TUI to show and respond to the permission
-      if (isChildSession) {
-        pending[rootSessionID][info.id] = entry
-        // Publish event with root sessionID so it appears in root TUI
-        const rootInfo = { ...info, sessionID: rootSessionID }
-        Bus.publish(Event.Updated, rootInfo)
-        log.info("bubbled to root", { permissionID: info.id, rootSessionID })
-      }
-
-      // Always publish for the original session
+      pending[effectiveSessionID][info.id] = { info, resolve, reject }
       Bus.publish(Event.Updated, info)
     })
   }
@@ -188,79 +159,43 @@ export namespace Permission {
   export type Response = z.infer<typeof Response>
 
   export function respond(input: { sessionID: Info["sessionID"]; permissionID: Info["id"]; response: Response }) {
-    log.info("response", input)
+    log.info("respond", input)
     const { pending, approved } = state()
     const match = pending[input.sessionID]?.[input.permissionID]
     if (!match) {
-      log.warn("permission not found", {
-        sessionID: input.sessionID,
-        permissionID: input.permissionID,
-        availableSessions: Object.keys(pending),
-        availablePermissions: pending[input.sessionID] ? Object.keys(pending[input.sessionID]) : []
-      })
+      log.warn("permission not found", { ...input, available: Object.keys(pending) })
       return
     }
 
-    // Get the original session and root session from the permission info
-    const originalSessionID = match.info.sourceSessionID || match.info.sessionID
-    const rootSessionID = match.info.rootSessionID
-
-    // Clean up from the session we received the response from
+    // Clean up
     delete pending[input.sessionID][input.permissionID]
 
-    // If this was a bubbled permission, also clean up from the other session
-    if (rootSessionID && input.sessionID !== originalSessionID) {
-      // Response came from root, clean up from original
-      delete pending[originalSessionID]?.[input.permissionID]
-    } else if (rootSessionID && input.sessionID === originalSessionID) {
-      // Response came from original (less common), clean up from root
-      delete pending[rootSessionID]?.[input.permissionID]
-    }
-
-    // Publish reply event for both sessions
+    // Publish reply
     Bus.publish(Event.Replied, {
       sessionID: input.sessionID,
       permissionID: input.permissionID,
       response: input.response,
     })
-    if (rootSessionID && input.sessionID !== originalSessionID) {
-      Bus.publish(Event.Replied, {
-        sessionID: originalSessionID,
-        permissionID: input.permissionID,
-        response: input.response,
-      })
-    }
 
     if (input.response === "reject") {
-      match.reject(new RejectedError(originalSessionID, input.permissionID, match.info.callID, match.info.metadata))
+      match.reject(new RejectedError(input.sessionID, input.permissionID, match.info.callID, match.info.metadata))
       return
     }
     match.resolve()
 
+    // "Always" approves this pattern for future requests in this session
     if (input.response === "always") {
-      // Apply approval to both sessions if bubbled
-      const sessionsToApprove = rootSessionID ? [originalSessionID, rootSessionID] : [input.sessionID]
-
-      for (const sessionToApprove of sessionsToApprove) {
-        approved[sessionToApprove] = approved[sessionToApprove] || {}
-        const approveKeys = toKeys(match.info.pattern, match.info.type)
-        for (const k of approveKeys) {
-          approved[sessionToApprove][k] = true
-        }
+      approved[input.sessionID] = approved[input.sessionID] || {}
+      for (const k of toKeys(match.info.pattern, match.info.type)) {
+        approved[input.sessionID][k] = true
       }
 
-      // Check pending items in both sessions
-      for (const sessionToCheck of sessionsToApprove) {
-        const items = pending[sessionToCheck]
-        if (!items) continue
+      // Auto-approve any pending items that now match
+      const items = pending[input.sessionID]
+      if (items) {
         for (const item of Object.values(items)) {
-          const itemKeys = toKeys(item.info.pattern, item.info.type)
-          if (covered(itemKeys, approved[sessionToCheck])) {
-            respond({
-              sessionID: item.info.sessionID,
-              permissionID: item.info.id,
-              response: input.response,
-            })
+          if (covered(toKeys(item.info.pattern, item.info.type), approved[input.sessionID])) {
+            respond({ sessionID: input.sessionID, permissionID: item.info.id, response: "always" })
           }
         }
       }

@@ -51,8 +51,8 @@ export const TaskTool = Tool.define("task", async () => {
       const agent = await Agent.get(params.subagent_type)
       if (!agent) throw new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`)
 
-      // Default to background mode for sub-agents (user stays in parent session)
-      const runInBackground = params.background ?? true
+      // Default to foreground mode for sub-agents
+      const runInBackground = params.background ?? false
 
       const session = await iife(async () => {
         if (params.session_id) {

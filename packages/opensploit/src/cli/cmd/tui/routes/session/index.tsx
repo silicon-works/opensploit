@@ -266,7 +266,7 @@ export function Session() {
         if (evt.name === "y" && !evt.shift) return "once"
         if (evt.name === "y" && evt.shift) return "always"
         if (evt.name === "n") return "reject"
-        // Keep legacy keys for compatibility
+        // Legacy keys
         if (evt.name === "return") return "once"
         if (evt.name === "a") return "always"
         if (evt.name === "d") return "reject"
@@ -274,13 +274,10 @@ export function Session() {
         return
       })
       if (response) {
-        // Use the original session ID if this is a bubbled permission
-        const targetSessionID = (first as any).sourceSessionID || route.sessionID
-        console.error("[DEBUG] Permission respond:", { permissionID: first.id, targetSessionID, routeSessionID: route.sessionID, response })
         sdk.client.permission.respond({
           permissionID: first.id,
-          sessionID: targetSessionID,
-          response: response,
+          sessionID: route.sessionID,
+          response,
         })
       }
     }
