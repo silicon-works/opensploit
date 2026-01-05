@@ -191,7 +191,15 @@ export namespace Permission {
     log.info("response", input)
     const { pending, approved } = state()
     const match = pending[input.sessionID]?.[input.permissionID]
-    if (!match) return
+    if (!match) {
+      log.warn("permission not found", {
+        sessionID: input.sessionID,
+        permissionID: input.permissionID,
+        availableSessions: Object.keys(pending),
+        availablePermissions: pending[input.sessionID] ? Object.keys(pending[input.sessionID]) : []
+      })
+      return
+    }
 
     // Get the original session and root session from the permission info
     const originalSessionID = match.info.sourceSessionID || match.info.sessionID

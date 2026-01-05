@@ -182,27 +182,28 @@ export function Session() {
     }
   })
 
-  // Auto-navigate to whichever session currently needs permission input
-  createEffect(() => {
-    const currentSession = session()
-    if (!currentSession) return
-    const currentPermissions = permissions()
-    let targetID = currentPermissions.length > 0 ? currentSession.id : undefined
-
-    if (!targetID) {
-      const child = sync.data.session.find(
-        (x) => x.parentID === currentSession.id && (sync.data.permission[x.id]?.length ?? 0) > 0,
-      )
-      if (child) targetID = child.id
-    }
-
-    if (targetID && targetID !== currentSession.id) {
-      navigate({
-        type: "session",
-        sessionID: targetID,
-      })
-    }
-  })
+  // Auto-navigate to child session needing permission - DISABLED for permission bubbling
+  // With permission bubbling, child permissions appear in parent, so no need to navigate
+  // createEffect(() => {
+  //   const currentSession = session()
+  //   if (!currentSession) return
+  //   const currentPermissions = permissions()
+  //   let targetID = currentPermissions.length > 0 ? currentSession.id : undefined
+  //
+  //   if (!targetID) {
+  //     const child = sync.data.session.find(
+  //       (x) => x.parentID === currentSession.id && (sync.data.permission[x.id]?.length ?? 0) > 0,
+  //     )
+  //     if (child) targetID = child.id
+  //   }
+  //
+  //   if (targetID && targetID !== currentSession.id) {
+  //     navigate({
+  //       type: "session",
+  //       sessionID: targetID,
+  //     })
+  //   }
+  // })
 
   let scroll: ScrollBoxRenderable
   let prompt: PromptRef
@@ -273,9 +274,12 @@ export function Session() {
         return
       })
       if (response) {
+        // Use the original session ID if this is a bubbled permission
+        const targetSessionID = (first as any).sourceSessionID || route.sessionID
+        console.error("[DEBUG] Permission respond:", { permissionID: first.id, targetSessionID, routeSessionID: route.sessionID, response })
         sdk.client.permission.respond({
           permissionID: first.id,
-          sessionID: route.sessionID,
+          sessionID: targetSessionID,
           response: response,
         })
       }
@@ -293,7 +297,7 @@ export function Session() {
   function moveChild(direction: number) {
     const parentID = session()?.parentID ?? session()?.id
     let children = sync.data.session
-      .filter((x) => x.parentID === parentID || x.id === parentID)
+      .filter((x) => (x.parentID === parentID || x.id === parentID) && !(x as any).background)
       .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     if (children.length === 1) return
     let next = children.findIndex((x) => x.id === session()?.id) + direction
