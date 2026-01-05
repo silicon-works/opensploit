@@ -1647,7 +1647,7 @@ ToolRegistry.register<typeof WriteTool>({
       return props.metadata.diagnostics?.[filePath] ?? []
     })
 
-    const done = !!props.input.filePath
+    const done = props.part.state.status === "completed" && !!props.input.filePath
 
     return (
       <>
