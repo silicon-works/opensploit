@@ -45,11 +45,15 @@ export const TaskTool = Tool.define("task", async () => {
       subagent_type: z.string().describe("The type of specialized agent to use for this task"),
       session_id: z.string().describe("Existing Task session to continue").optional(),
       command: z.string().describe("The command that triggered this task").optional(),
-      background: z.boolean().describe("Run task in background (non-blocking)").optional(),
+      background: z.boolean().describe("Run task in background (non-blocking). Defaults to true for sub-agents.").optional(),
     }),
     async execute(params, ctx) {
       const agent = await Agent.get(params.subagent_type)
       if (!agent) throw new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`)
+
+      // Default to background mode for sub-agents (user stays in parent session)
+      const runInBackground = params.background ?? true
+
       const session = await iife(async () => {
         if (params.session_id) {
           const found = await Session.get(params.session_id).catch(() => {})
@@ -59,7 +63,7 @@ export const TaskTool = Tool.define("task", async () => {
         return await Session.create({
           parentID: ctx.sessionID,
           title: params.description + ` (@${agent.name} subagent)`,
-          background: params.background,
+          background: runInBackground,
         })
       })
       const msg = await MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID })
@@ -124,7 +128,7 @@ ${params.prompt}`
       }
 
       // Background execution mode
-      if (params.background) {
+      if (runInBackground) {
         const taskID = session.id
 
         // Register the background task

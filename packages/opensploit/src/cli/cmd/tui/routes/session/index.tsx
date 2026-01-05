@@ -261,6 +261,11 @@ export function Session() {
     if (first) {
       const response = iife(() => {
         if (evt.ctrl || evt.meta) return
+        // y = once, Y (shift+y) = always, n = reject
+        if (evt.name === "y" && !evt.shift) return "once"
+        if (evt.name === "y" && evt.shift) return "always"
+        if (evt.name === "n") return "reject"
+        // Keep legacy keys for compatibility
         if (evt.name === "return") return "once"
         if (evt.name === "a") return "always"
         if (evt.name === "d") return "reject"
