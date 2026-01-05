@@ -111,7 +111,24 @@ export function Session() {
   const promptRef = usePromptRef()
   const session = createMemo(() => sync.session.get(route.sessionID)!)
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
-  const permissions = createMemo(() => sync.data.permission[route.sessionID] ?? [])
+  // Get permissions from both current session AND root session (for sub-agents)
+  // Sub-agent permissions are stored under root session for bubbling
+  const permissions = createMemo(() => {
+    const currentPerms = sync.data.permission[route.sessionID] ?? []
+    const rootID = session()?.parentID
+    if (rootID && rootID !== route.sessionID) {
+      const rootPerms = sync.data.permission[rootID] ?? []
+      // Combine and dedupe by ID
+      const combined = [...currentPerms]
+      for (const p of rootPerms) {
+        if (!combined.some((c) => c.id === p.id)) {
+          combined.push(p)
+        }
+      }
+      return combined
+    }
+    return currentPerms
+  })
 
   const pending = createMemo(() => {
     return messages().findLast((x) => x.role === "assistant" && !x.time.completed)?.id
@@ -273,9 +290,10 @@ export function Session() {
         return
       })
       if (response) {
+        // Use the permission's sessionID (which is the root session for sub-agents)
         sdk.client.permission.respond({
           permissionID: first.id,
-          sessionID: route.sessionID,
+          sessionID: first.sessionID,
           response,
         })
       }
@@ -1442,13 +1460,33 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
   const { showDetails } = use()
   const sync = useSync()
   const [margin, setMargin] = createSignal(0)
+
+  // Get permissions that apply to this message's session
+  // For sub-agents, permissions are stored under root session with sourceSessionID pointing to sub-agent
+  const getPermissionsForSession = () => {
+    const direct = sync.data.permission[props.message.sessionID] ?? []
+    // Also check all permissions to find ones where sourceSessionID matches (bubbled from this session)
+    const fromRoot = Object.values(sync.data.permission)
+      .flat()
+      .filter((p) => p.sourceSessionID === props.message.sessionID)
+    // Combine and dedupe
+    const combined = [...direct]
+    for (const p of fromRoot) {
+      if (!combined.some((c) => c.id === p.id)) {
+        combined.push(p)
+      }
+    }
+    return combined
+  }
+
   const component = createMemo(() => {
     // Hide tool if showDetails is false and tool completed successfully
     // But always show if there's an error or permission is required
+    const perms = getPermissionsForSession()
     const shouldHide =
       !showDetails() &&
       props.part.state.status === "completed" &&
-      !sync.data.permission[props.message.sessionID]?.some((x) => x.callID === props.part.callID)
+      !perms.some((x) => x.callID === props.part.callID)
 
     if (shouldHide) {
       return undefined
@@ -1459,7 +1497,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
     const metadata = props.part.state.status === "pending" ? {} : (props.part.state.metadata ?? {})
     const input = props.part.state.input ?? {}
     const container = ToolRegistry.container(props.part.tool)
-    const permissions = sync.data.permission[props.message.sessionID] ?? []
+    const permissions = getPermissionsForSession()
     const permissionIndex = permissions.findIndex((x) => x.callID === props.part.callID)
     const permission = permissions[permissionIndex]
 
