@@ -17,6 +17,7 @@ import { fn } from "@/util/fn"
 import { Command } from "../command"
 import { Snapshot } from "@/snapshot"
 import { cleanupSessionHosts } from "@/tool/hosts"
+import { SessionDirectory } from "./directory"
 
 import type { Provider } from "@/provider/provider"
 
@@ -42,6 +43,7 @@ export namespace Session {
       projectID: z.string(),
       directory: z.string(),
       parentID: Identifier.schema("session").optional(),
+      background: z.boolean().optional(), // Background sub-agent session (hidden from session list)
       summary: z
         .object({
           additions: z.number(),
@@ -127,6 +129,7 @@ export namespace Session {
       .object({
         parentID: Identifier.schema("session").optional(),
         title: z.string().optional(),
+        background: z.boolean().optional(),
       })
       .optional(),
     async (input) => {
@@ -134,6 +137,7 @@ export namespace Session {
         parentID: input?.parentID,
         directory: Instance.directory,
         title: input?.title,
+        background: input?.background,
       })
     },
   )
@@ -175,13 +179,14 @@ export namespace Session {
     })
   })
 
-  export async function createNext(input: { id?: string; title?: string; parentID?: string; directory: string }) {
+  export async function createNext(input: { id?: string; title?: string; parentID?: string; directory: string; background?: boolean }) {
     const result: Info = {
       id: Identifier.descending("session", input.id),
       version: Installation.VERSION,
       projectID: Instance.project.id,
       directory: input.directory,
       parentID: input.parentID,
+      background: input.background,
       title: input.title ?? createDefaultTitle(!!input.parentID),
       time: {
         created: Date.now(),
@@ -193,6 +198,17 @@ export namespace Session {
     Bus.publish(Event.Created, {
       info: result,
     })
+
+    // Create session working directory for parent (non-child) sessions
+    if (!result.parentID) {
+      try {
+        SessionDirectory.create(result.id)
+        log.info("created session directory", { sessionID: result.id })
+      } catch (e) {
+        log.warn("failed to create session directory", { sessionID: result.id, error: e })
+      }
+    }
+
     const cfg = await Config.get()
     if (!result.parentID && (Flag.OPENSPLOIT_AUTO_SHARE || cfg.share === "auto"))
       share(result.id)
@@ -304,6 +320,10 @@ export namespace Session {
       await unshare(sessionID).catch(() => {})
       // Clean up any hosts entries for this session
       await cleanupSessionHosts(sessionID).catch(() => {})
+      // Clean up session working directory (only for parent sessions)
+      if (!session.parentID) {
+        SessionDirectory.cleanup(sessionID)
+      }
       for (const msg of await Storage.list(["message", sessionID])) {
         for (const part of await Storage.list(["part", msg.at(-1)!])) {
           await Storage.remove(part)

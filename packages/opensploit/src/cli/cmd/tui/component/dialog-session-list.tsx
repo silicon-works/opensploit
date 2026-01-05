@@ -28,7 +28,7 @@ export function DialogSessionList() {
   const options = createMemo(() => {
     const today = new Date().toDateString()
     return sync.data.session
-      .filter((x) => x.parentID === undefined)
+      .filter((x) => x.parentID === undefined && !(x as any).background)
       .toSorted((a, b) => b.time.updated - a.time.updated)
       .map((x) => {
         const date = new Date(x.time.updated)

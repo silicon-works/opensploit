@@ -28,6 +28,7 @@ import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
 import { OutcomeCommand } from "./cli/cmd/outcome"
+import { EngagementLogCommand } from "./cli/cmd/engagement-log"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -100,6 +101,7 @@ const cli = yargs(hideBin(process.argv))
   .command(PrCommand)
   .command(SessionCommand)
   .command(OutcomeCommand)
+  .command(EngagementLogCommand)
   .fail((msg) => {
     if (
       msg.startsWith("Unknown argument") ||

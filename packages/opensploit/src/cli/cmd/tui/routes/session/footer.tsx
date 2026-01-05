@@ -5,6 +5,7 @@ import { useDirectory } from "../../context/directory"
 import { useConnected } from "../../component/dialog-model"
 import { createStore } from "solid-js/store"
 import { useRoute } from "../../context/route"
+import { BackgroundTask } from "@/session/background-task"
 
 export function Footer() {
   const { theme } = useTheme()
@@ -16,6 +17,20 @@ export function Footer() {
   const permissions = createMemo(() => {
     if (route.data.type !== "session") return []
     return sync.data.permission[route.data.sessionID] ?? []
+  })
+
+  // Count permissions from sub-agents (bubbled permissions)
+  // Note: sourceSessionID is added by permission bubbling but not yet in SDK types
+  const bubbledPermissions = createMemo(() => {
+    return permissions().filter((p) => (p as any).sourceSessionID !== undefined)
+  })
+
+  // Get background task summary
+  const backgroundTasks = createMemo(() => {
+    if (route.data.type !== "session") return null
+    const summary = BackgroundTask.getSummary(route.data.sessionID)
+    if (summary.total === 0) return null
+    return summary
   })
   const directory = useDirectory()
   const connected = useConnected()
@@ -57,10 +72,29 @@ export function Footer() {
             </text>
           </Match>
           <Match when={connected()}>
+            <Show when={backgroundTasks()}>
+              <text fg={theme.text}>
+                <Switch>
+                  <Match when={backgroundTasks()!.waitingApproval > 0}>
+                    <span style={{ fg: theme.warning }}>◐</span>
+                  </Match>
+                  <Match when={backgroundTasks()!.running > 0}>
+                    <span style={{ fg: theme.success }}>◐</span>
+                  </Match>
+                  <Match when={true}>
+                    <span style={{ fg: theme.textMuted }}>◐</span>
+                  </Match>
+                </Switch>{" "}
+                {backgroundTasks()!.running} task{backgroundTasks()!.running !== 1 ? "s" : ""}
+              </text>
+            </Show>
             <Show when={permissions().length > 0}>
               <text fg={theme.warning}>
                 <span style={{ fg: theme.warning }}>◉</span> {permissions().length} Permission
                 {permissions().length > 1 ? "s" : ""}
+                <Show when={bubbledPermissions().length > 0}>
+                  <span style={{ fg: theme.textMuted }}> ({bubbledPermissions().length} from sub-agents)</span>
+                </Show>
               </text>
             </Show>
             <text fg={theme.text}>

@@ -27,6 +27,7 @@ import {
 } from "@opentui/core"
 import { Prompt, type PromptRef } from "@tui/component/prompt"
 import type { AssistantMessage, Part, ToolPart, UserMessage, TextPart, ReasoningPart } from "@opencode-ai/sdk/v2"
+import { MessageV2 } from "@/session/message-v2"
 import { useLocal } from "@tui/context/local"
 import { Locale } from "@/util/locale"
 import type { Tool } from "@/tool/tool"
@@ -69,6 +70,8 @@ import { Footer } from "./footer.tsx"
 import { usePromptRef } from "../../context/prompt"
 import { Filesystem } from "@/util/filesystem"
 import { DialogSubagent } from "./dialog-subagent.tsx"
+import { ApprovalQueue } from "../../component/approval-queue.tsx"
+import { BackgroundTask } from "@/session/background-task"
 
 addDefaultParsers(parsers.parsers)
 
@@ -1082,6 +1085,7 @@ export function Session() {
                 )}
               </For>
             </scrollbox>
+            <ApprovalQueue />
             <box flexShrink={0}>
               <Prompt
                 ref={(r) => {
@@ -1319,6 +1323,7 @@ const PART_MAPPING = {
   text: TextPart,
   tool: ToolPart,
   reasoning: ReasoningPart,
+  tvar: TVARPartComponent,
 }
 
 function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: AssistantMessage }) {
@@ -1346,6 +1351,58 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
           streaming={true}
           syntaxStyle={subtleSyntax()}
           content={"_Thinking:_ " + content()}
+          conceal={ctx.conceal()}
+          fg={theme.textMuted}
+        />
+      </box>
+    </Show>
+  )
+}
+
+function TVARPartComponent(props: { last: boolean; part: MessageV2.TVARPart; message: AssistantMessage }) {
+  const { theme, subtleSyntax } = useTheme()
+  const ctx = use()
+
+  // Format TVAR content with labeled sections
+  const content = createMemo(() => {
+    const parts: string[] = []
+    if (props.part.thought) parts.push(`**T:** ${props.part.thought}`)
+    if (props.part.verify) parts.push(`**V:** ${props.part.verify}`)
+    if (props.part.action) parts.push(`**A:** ${props.part.action}`)
+    if (props.part.result) parts.push(`**R:** ${props.part.result}`)
+    return parts.join("\n")
+  })
+
+  // Phase indicator for context
+  const phaseLabel = createMemo(() => {
+    if (!props.part.phase) return ""
+    const phases: Record<string, string> = {
+      reconnaissance: "Recon",
+      enumeration: "Enum",
+      exploitation: "Exploit",
+      post_exploitation: "Post-Exploit",
+      reporting: "Report",
+    }
+    return ` [${phases[props.part.phase] ?? props.part.phase}]`
+  })
+
+  return (
+    <Show when={content() && ctx.showThinking()}>
+      <box
+        id={"tvar-" + props.part.id}
+        paddingLeft={2}
+        marginTop={1}
+        flexDirection="column"
+        border={["left"]}
+        customBorderChars={SplitBorder.customBorderChars}
+        borderColor={theme.backgroundElement}
+      >
+        <code
+          filetype="markdown"
+          drawUnstyledText={false}
+          streaming={true}
+          syntaxStyle={subtleSyntax()}
+          content={`_TVAR${phaseLabel()}:_\n${content()}`}
           conceal={ctx.conceal()}
           fg={theme.textMuted}
         />
@@ -1674,31 +1731,123 @@ ToolRegistry.register<typeof TaskTool>({
     const keybind = useKeybind()
     const dialog = useDialog()
     const renderer = useRenderer()
+    const route = useRoute()
+    const [expanded, setExpanded] = createSignal(false)
+
+    // Get current session to look up background task status
+    const rootSessionID = createMemo(() => {
+      if (route.data.type === "session") return route.data.sessionID
+      return null
+    })
+
+    // Get background task info if this is a background task
+    const backgroundTask = createMemo(() => {
+      const taskId = (props.metadata as any)?.taskId
+      const rootId = rootSessionID()
+      if (!taskId || !rootId) return null
+      return BackgroundTask.getTask(rootId, taskId)
+    })
+
+    const isBackground = () => (props.metadata as any)?.background === true
+
+    // Status indicator for background tasks
+    const statusIcon = createMemo(() => {
+      const task = backgroundTask()
+      if (!task) return "◉"
+      switch (task.status) {
+        case "running":
+          return "⟳"
+        case "waiting_approval":
+          return "⚠"
+        case "completed":
+          return "✓"
+        case "error":
+          return "✗"
+        default:
+          return "◉"
+      }
+    })
+
+    const statusColor = createMemo(() => {
+      const task = backgroundTask()
+      if (!task) return theme.text
+      switch (task.status) {
+        case "running":
+          return theme.primary
+        case "waiting_approval":
+          return theme.warning
+        case "completed":
+          return theme.success
+        case "error":
+          return theme.error
+        default:
+          return theme.text
+      }
+    })
 
     return (
       <>
-        <ToolTitle icon="◉" fallback="Delegating..." when={props.input.subagent_type ?? props.input.description}>
-          {Locale.titlecase(props.input.subagent_type ?? "unknown")} Task "{props.input.description}"
-        </ToolTitle>
+        <box flexDirection="row" gap={1}>
+          <ToolTitle icon={statusIcon()} fallback="Delegating..." when={props.input.subagent_type ?? props.input.description}>
+            <span style={{ fg: statusColor() }}>{Locale.titlecase(props.input.subagent_type ?? "unknown")}</span> Task "{props.input.description}"
+            <Show when={isBackground()}>
+              <span style={{ fg: theme.textMuted }}> (background)</span>
+            </Show>
+          </ToolTitle>
+        </box>
+
+        {/* Background task status */}
+        <Show when={backgroundTask()}>
+          {(task) => (
+            <box paddingLeft={2}>
+              <text fg={statusColor()}>
+                Status: {task().status}
+                <Show when={task().pendingApprovals > 0}>
+                  <span style={{ fg: theme.warning }}> ({task().pendingApprovals} pending approval{task().pendingApprovals > 1 ? "s" : ""})</span>
+                </Show>
+              </text>
+              <Show when={task().status === "completed" && task().result}>
+                <text fg={theme.textMuted}>Result: {task().result!.substring(0, 100)}...</text>
+              </Show>
+              <Show when={task().status === "error" && task().error}>
+                <text fg={theme.error}>Error: {task().error}</text>
+              </Show>
+            </box>
+          )}
+        </Show>
+
+        {/* Expandable tool summary */}
         <Show when={props.metadata.summary?.length}>
           <box>
-            <For each={props.metadata.summary ?? []}>
-              {(task, index) => {
-                const summary = props.metadata.summary ?? []
-                return (
-                  <text style={{ fg: task.state.status === "error" ? theme.error : theme.textMuted }}>
-                    {index() === summary.length - 1 ? "└" : "├"} {Locale.titlecase(task.tool)}{" "}
-                    {task.state.status === "completed" ? task.state.title : ""}
-                  </text>
-                )
-              }}
-            </For>
+            <box
+              flexDirection="row"
+              gap={1}
+              onMouseUp={() => setExpanded((e) => !e)}
+            >
+              <text fg={theme.textMuted}>{expanded() ? "▼" : "▶"} {props.metadata.summary?.length} tool calls</text>
+            </box>
+            <Show when={expanded()}>
+              <For each={props.metadata.summary ?? []}>
+                {(task, index) => {
+                  const summary = props.metadata.summary ?? []
+                  return (
+                    <text style={{ fg: task.state.status === "error" ? theme.error : theme.textMuted }}>
+                      {index() === summary.length - 1 ? "└" : "├"} {Locale.titlecase(task.tool)}{" "}
+                      {task.state.status === "completed" ? task.state.title : ""}
+                    </text>
+                  )
+                }}
+              </For>
+            </Show>
           </box>
         </Show>
-        <text fg={theme.text}>
-          {keybind.print("session_child_cycle")}, {keybind.print("session_child_cycle_reverse")}
-          <span style={{ fg: theme.textMuted }}> to navigate between subagent sessions</span>
-        </text>
+
+        <Show when={!isBackground()}>
+          <text fg={theme.text}>
+            {keybind.print("session_child_cycle")}, {keybind.print("session_child_cycle_reverse")}
+            <span style={{ fg: theme.textMuted }}> to navigate between subagent sessions</span>
+          </text>
+        </Show>
       </>
     )
   },

@@ -28,6 +28,7 @@ import { ToolRegistrySearchTool } from "./tool-registry-search"
 import { McpToolInvoke } from "./mcp-tool"
 import { ReadToolOutputTool } from "./read-tool-output"
 import { HostsTool } from "./hosts"
+import { EngagementStateTool } from "./engagement-state"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -113,6 +114,7 @@ export namespace ToolRegistry {
       McpToolInvoke,
       ReadToolOutputTool,
       HostsTool,
+      EngagementStateTool,
       ...(Flag.OPENSPLOIT_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...custom,

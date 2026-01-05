@@ -353,6 +353,25 @@ export namespace SessionProcessor {
                         hasResult: !!block.result,
                       })
                     }
+
+                    // Strip TVAR blocks from text to avoid duplication in display
+                    // (TVAR is now stored in TVARPart and will be rendered separately)
+                    if (tvarBlocks.length > 0) {
+                      let strippedText = currentText.text
+                      // Sort blocks by position descending to avoid index shifting issues
+                      const sortedBlocks = [...tvarBlocks].sort((a, b) => b.startIndex - a.startIndex)
+                      for (const block of sortedBlocks) {
+                        strippedText = strippedText.slice(0, block.startIndex) + strippedText.slice(block.endIndex)
+                      }
+                      // Update the text part with stripped content
+                      currentText.text = strippedText.trim()
+                      await Session.updatePart(currentText)
+                      log.info("tvar_stripped", {
+                        originalLength: currentText.text.length + tvarBlocks.reduce((sum, b) => sum + b.raw.length, 0),
+                        strippedLength: currentText.text.length,
+                        blocksRemoved: tvarBlocks.length,
+                      })
+                    }
                   }
                   currentText = undefined
                   break
