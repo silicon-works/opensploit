@@ -54,9 +54,14 @@ export namespace PhaseGating {
     // Post-exploitation tools
     privesc: "post-exploitation",
     ssh: "post-exploitation",
+    "shell-session": "post-exploitation",
     mysql: "post-exploitation",
     mongodb: "post-exploitation",
     sqlite: "post-exploitation",
+    tunnel: "post-exploitation",
+
+    // Multi-phase tools (state management - allowed in all phases)
+    // target-tracker is intentionally omitted - it's a utility tool for all phases
   }
 
   /**
