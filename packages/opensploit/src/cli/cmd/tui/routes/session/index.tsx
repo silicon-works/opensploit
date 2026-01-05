@@ -70,7 +70,6 @@ import { Footer } from "./footer.tsx"
 import { usePromptRef } from "../../context/prompt"
 import { Filesystem } from "@/util/filesystem"
 import { DialogSubagent } from "./dialog-subagent.tsx"
-import { ApprovalQueue } from "../../component/approval-queue.tsx"
 import { BackgroundTask } from "@/session/background-task"
 
 addDefaultParsers(parsers.parsers)
@@ -1091,7 +1090,6 @@ export function Session() {
                 )}
               </For>
             </scrollbox>
-            <ApprovalQueue />
             <box flexShrink={0}>
               <Prompt
                 ref={(r) => {
