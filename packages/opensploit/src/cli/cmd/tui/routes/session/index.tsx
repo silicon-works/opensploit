@@ -1447,7 +1447,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
     // But always show if there's an error or permission is required
     const shouldHide =
       !showDetails() &&
-      props.part.state.status === "completed" &&
+      props.part?.state?.status === "completed" &&
       !sync.data.permission[props.message.sessionID]?.some((x) => x.callID === props.part.callID)
 
     if (shouldHide) {
@@ -1456,8 +1456,8 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
 
     const render = ToolRegistry.render(props.part.tool) ?? GenericTool
 
-    const metadata = props.part.state.status === "pending" ? {} : (props.part.state.metadata ?? {})
-    const input = props.part.state.input ?? {}
+    const metadata = props.part?.state?.status === "pending" ? {} : (props.part?.state?.metadata ?? {})
+    const input = props.part?.state?.input ?? {}
     const container = ToolRegistry.container(props.part.tool)
     const permissions = sync.data.permission[props.message.sessionID] ?? []
     const permissionIndex = permissions.findIndex((x) => x.callID === props.part.callID)
@@ -1513,11 +1513,11 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
           tool={props.part.tool}
           metadata={metadata}
           permission={permission?.metadata ?? {}}
-          output={props.part.state.status === "completed" ? props.part.state.output : undefined}
+          output={props.part?.state?.status === "completed" ? props.part.state.output : undefined}
         />
-        {props.part.state.status === "error" && (
+        {props.part?.state?.status === "error" && (
           <box paddingLeft={2}>
-            <text fg={theme.error}>{props.part.state.error.replace("Error: ", "")}</text>
+            <text fg={theme.error}>{props.part.state.error?.replace("Error: ", "") ?? ""}</text>
           </box>
         )}
         {permission && (
