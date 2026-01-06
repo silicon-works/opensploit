@@ -207,6 +207,8 @@ export namespace Agent {
           "*": "ask",
         },
         webfetch: "ask",
+        // Allow external directory access - pentest agents work with /tmp session dirs
+        external_directory: "allow",
       },
       cfg.permission ?? {},
     )
@@ -220,6 +222,8 @@ export namespace Agent {
           "*": "ask",
         },
         webfetch: "ask",
+        // Allow external directory access - pentest agents work with /tmp session dirs
+        external_directory: "allow",
       },
       cfg.permission ?? {},
     )

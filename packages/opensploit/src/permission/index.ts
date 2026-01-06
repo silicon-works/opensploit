@@ -106,10 +106,11 @@ export namespace Permission {
     const effectiveSessionID = getRootSession(input.sessionID)
     const isSubAgent = effectiveSessionID !== input.sessionID
 
-    log.info("asking", {
-      sessionID: input.sessionID,
-      effectiveSessionID,
+    log.info("permission.ask", {
+      inputSessionID: input.sessionID.slice(-8),
+      effectiveSessionID: effectiveSessionID.slice(-8),
       isSubAgent,
+      type: input.type,
       pattern: input.pattern,
     })
 
@@ -151,6 +152,12 @@ export namespace Permission {
 
     return new Promise<void>((resolve, reject) => {
       pending[effectiveSessionID][info.id] = { info, resolve, reject }
+      log.info("permission.publish", {
+        sessionID: effectiveSessionID.slice(-8),
+        permissionID: info.id,
+        type: info.type,
+        pendingCount: Object.keys(pending[effectiveSessionID]).length,
+      })
       Bus.publish(Event.Updated, info)
     })
   }

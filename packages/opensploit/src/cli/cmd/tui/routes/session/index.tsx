@@ -102,6 +102,68 @@ function use() {
   return ctx
 }
 
+/**
+ * Renders a pending permission using the same UI as ToolPart (REQ-AGT-005)
+ * Used to show sub-agent permissions in parent session
+ */
+function PendingPermission(props: { permission: import("@opencode-ai/sdk/v2").Permission; isFirst: boolean }) {
+  const { theme } = useTheme()
+
+  // Use the tool's registered render or GenericTool
+  const render = ToolRegistry.render(props.permission.type) ?? GenericTool
+
+  // Get sub-agent name if available
+  const subAgentName = () => {
+    const perm = props.permission as any
+    if (perm.agentName) return perm.agentName
+    return "sub-agent"
+  }
+
+  return (
+    <box
+      flexShrink={0}
+      border={props.isFirst ? ["left", "right"] : ["left"]}
+      borderColor={props.isFirst ? theme.warning : theme.background}
+      backgroundColor={theme.backgroundPanel}
+      paddingTop={1}
+      paddingBottom={1}
+      paddingLeft={2}
+      marginTop={1}
+      gap={1}
+      customBorderChars={SplitBorder.customBorderChars}
+    >
+      <text fg={theme.textMuted}>
+        from <span style={{ fg: theme.accent }}>{subAgentName()}</span>
+      </text>
+      <Dynamic
+        component={render}
+        input={props.permission.metadata}
+        tool={props.permission.type}
+        metadata={props.permission.metadata}
+        permission={props.permission.metadata}
+        output={undefined}
+      />
+      <box gap={1}>
+        <text fg={theme.text}>Permission required to run this tool:</text>
+        <box flexDirection="row" gap={2}>
+          <text fg={theme.text}>
+            <b>enter</b>
+            <span style={{ fg: theme.textMuted }}> accept</span>
+          </text>
+          <text fg={theme.text}>
+            <b>a</b>
+            <span style={{ fg: theme.textMuted }}> accept always</span>
+          </text>
+          <text fg={theme.text}>
+            <b>d</b>
+            <span style={{ fg: theme.textMuted }}> deny</span>
+          </text>
+        </box>
+      </box>
+    </box>
+  )
+}
+
 export function Session() {
   const route = useRouteData("session")
   const { navigate } = useRoute()
@@ -111,23 +173,34 @@ export function Session() {
   const promptRef = usePromptRef()
   const session = createMemo(() => sync.session.get(route.sessionID)!)
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
-  // Get permissions from both current session AND root session (for sub-agents)
-  // Sub-agent permissions are stored under root session for bubbling
-  const permissions = createMemo(() => {
-    const currentPerms = sync.data.permission[route.sessionID] ?? []
-    const rootID = session()?.parentID
-    if (rootID && rootID !== route.sessionID) {
-      const rootPerms = sync.data.permission[rootID] ?? []
-      // Combine and dedupe by ID
-      const combined = [...currentPerms]
-      for (const p of rootPerms) {
-        if (!combined.some((c) => c.id === p.id)) {
-          combined.push(p)
-        }
-      }
-      return combined
+
+  // Find root session by traversing parent chain
+  // Permissions bubble to root, so we need to look there
+  const rootSessionID = createMemo(() => {
+    const currentSession = session()
+    if (!currentSession) return route.sessionID
+
+    // If this session has a parent, traverse up to find root
+    let current = currentSession
+    while (current?.parentID) {
+      const parent = sync.session.get(current.parentID)
+      if (!parent) break
+      current = parent
     }
-    return currentPerms
+    return current?.id ?? route.sessionID
+  })
+
+  // Look up permissions from ROOT session (where they bubble to)
+  // Also check current session as fallback
+  const permissions = createMemo(() => {
+    const rootID = rootSessionID()
+    const rootPerms = sync.data.permission[rootID] ?? []
+    const currentPerms = sync.data.permission[route.sessionID] ?? []
+
+    // If we're at root, just return root permissions
+    if (rootID === route.sessionID) return rootPerms
+    // Also include any permissions directly under current session (shouldn't happen, but fallback)
+    return [...rootPerms, ...currentPerms]
   })
 
   const pending = createMemo(() => {
@@ -290,7 +363,8 @@ export function Session() {
         return
       })
       if (response) {
-        // Use the permission's sessionID (which is the root session for sub-agents)
+        // Use permission's sessionID (root session where it bubbled to)
+        // not the current route session
         sdk.client.permission.respond({
           permissionID: first.id,
           sessionID: first.sessionID,
@@ -1107,6 +1181,11 @@ export function Session() {
                   </Switch>
                 )}
               </For>
+              {/* Pending permissions from sub-agents inline (REQ-AGT-005) */}
+              {/* Only show when viewing parent session - ToolPart handles it in sub-agent */}
+              <For each={permissions().filter((p) => p.sessionID === route.sessionID && (p as any).sourceSessionID)}>
+                {(perm, index) => <PendingPermission permission={perm} isFirst={index() === 0} />}
+              </For>
             </scrollbox>
             <box flexShrink={0}>
               <Prompt
@@ -1461,32 +1540,31 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
   const sync = useSync()
   const [margin, setMargin] = createSignal(0)
 
-  // Get permissions that apply to this message's session
-  // For sub-agents, permissions are stored under root session with sourceSessionID pointing to sub-agent
-  const getPermissionsForSession = () => {
-    const direct = sync.data.permission[props.message.sessionID] ?? []
-    // Also check all permissions to find ones where sourceSessionID matches (bubbled from this session)
-    const fromRoot = Object.values(sync.data.permission)
-      .flat()
-      .filter((p) => p.sourceSessionID === props.message.sessionID)
-    // Combine and dedupe
-    const combined = [...direct]
-    for (const p of fromRoot) {
-      if (!combined.some((c) => c.id === p.id)) {
-        combined.push(p)
-      }
+  // Get permissions for this tool - check both the message's session AND the root session
+  // Sub-agent permissions are stored under root session for bubbling
+  const getPermissionsForTool = () => {
+    // First check direct session
+    const directPerms = sync.data.permission[props.message.sessionID] ?? []
+    const directMatch = directPerms.find((x) => x.callID === props.part.callID)
+    if (directMatch) return { permissions: directPerms, permission: directMatch }
+
+    // Check all permissions for ones that match this callID (bubbled from sub-agents)
+    for (const [sessionID, perms] of Object.entries(sync.data.permission)) {
+      const match = perms.find((x) => x.callID === props.part.callID)
+      if (match) return { permissions: perms, permission: match }
     }
-    return combined
+
+    return { permissions: [], permission: undefined }
   }
 
   const component = createMemo(() => {
     // Hide tool if showDetails is false and tool completed successfully
     // But always show if there's an error or permission is required
-    const perms = getPermissionsForSession()
+    const { permissions, permission } = getPermissionsForTool()
     const shouldHide =
       !showDetails() &&
       props.part.state.status === "completed" &&
-      !perms.some((x) => x.callID === props.part.callID)
+      !permission
 
     if (shouldHide) {
       return undefined
@@ -1497,9 +1575,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
     const metadata = props.part.state.status === "pending" ? {} : (props.part.state.metadata ?? {})
     const input = props.part.state.input ?? {}
     const container = ToolRegistry.container(props.part.tool)
-    const permissions = getPermissionsForSession()
-    const permissionIndex = permissions.findIndex((x) => x.callID === props.part.callID)
-    const permission = permissions[permissionIndex]
+    const permissionIndex = permission ? permissions.indexOf(permission) : -1
 
     const style: BoxProps =
       container === "block" || permission

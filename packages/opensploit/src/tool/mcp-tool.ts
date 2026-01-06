@@ -4,8 +4,8 @@ import { ContainerManager } from "../container"
 import { Log } from "../util/log"
 import { OutputStore } from "./output-store"
 import { TargetValidation } from "./target-validation"
-import { Permission } from "../permission"
 import { PhaseGating } from "./phase-gating"
+import { Permission } from "../permission"
 import path from "path"
 import os from "os"
 import fs from "fs/promises"
@@ -244,34 +244,30 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
         phaseWarning = phaseCheck.warning + "\n\n"
       }
 
-      // Check if privileged mode requires approval
-      const requiresPrivileged = toolDef.requirements?.privileged ?? false
-      if (requiresPrivileged) {
-        try {
-          await Permission.ask({
-            type: "privileged_container",
-            title: `Run ${toolName} in privileged mode?`,
-            pattern: `container:${toolName}:privileged`,
-            sessionID: ctx.sessionID,
-            messageID: ctx.messageID,
-            callID: ctx.callID,
-            metadata: {
-              tool: toolName,
-              method,
-              reason: "This tool requires raw socket access for network operations (e.g., SYN scans, OS detection)",
-              image: toolDef.image,
-            },
-          })
-        } catch (error) {
-          if (error instanceof Permission.RejectedError) {
-            return {
-              output: `⛔ PRIVILEGED MODE DENIED\n\nThe tool "${toolName}" requires privileged container access for:\n- Raw socket access (SYN scans, packet manipulation)\n- OS detection\n- Low-level network operations\n\nYou can approve this request to continue.`,
-              title: `Blocked: Privileged access denied`,
-              metadata: { tool: toolName, method, success: false, error: "Privileged access denied" },
-            }
+      // Ask permission to run the MCP tool
+      try {
+        await Permission.ask({
+          type: "mcp_tool",
+          title: `Run ${toolName}.${method}?`,
+          pattern: `mcp:${toolName}:${method}`,
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+          callID: ctx.callID,
+          metadata: {
+            tool: toolName,
+            method,
+            args,
+          },
+        })
+      } catch (error) {
+        if (error instanceof Permission.RejectedError) {
+          return {
+            output: `Permission denied to run ${toolName}.${method}`,
+            title: `Blocked: Permission denied`,
+            metadata: { tool: toolName, method, success: false, error: "Permission denied" },
           }
-          throw error
         }
+        throw error
       }
 
       // Determine if we should use local server or Docker

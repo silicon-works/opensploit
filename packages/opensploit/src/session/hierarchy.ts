@@ -29,7 +29,11 @@ export function registerRootSession(sessionID: string, rootSessionID: string): v
  * Returns the sessionID itself if it's a root session (no parent)
  */
 export function getRootSession(sessionID: string): string {
-  return rootSessionMap.get(sessionID) ?? sessionID
+  const root = rootSessionMap.get(sessionID)
+  if (!root) {
+    log.debug("getRootSession miss", { sessionID: sessionID.slice(-8), mapSize: rootSessionMap.size })
+  }
+  return root ?? sessionID
 }
 
 /**
