@@ -30,9 +30,11 @@ export function registerRootSession(sessionID: string, rootSessionID: string): v
  */
 export function getRootSession(sessionID: string): string {
   const root = rootSessionMap.get(sessionID)
-  if (!root) {
-    log.debug("getRootSession miss", { sessionID: sessionID.slice(-8), mapSize: rootSessionMap.size })
-  }
+  log.info("getRootSession", {
+    sessionID: sessionID.slice(-8),
+    root: root?.slice(-8) ?? "MISS",
+    mapSize: rootSessionMap.size,
+  })
   return root ?? sessionID
 }
 

@@ -104,15 +104,15 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             break
           }
           const match = Binary.search(permissions, event.properties.id, (p) => p.id)
+          if (match.found) {
+            setStore("permission", event.properties.sessionID, match.index, reconcile(event.properties))
+            break
+          }
           setStore(
             "permission",
             event.properties.sessionID,
             produce((draft) => {
-              if (match.found) {
-                draft[match.index] = event.properties
-                return
-              }
-              draft.push(event.properties)
+              draft.splice(match.index, 0, event.properties)
             }),
           )
           break

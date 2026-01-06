@@ -26,7 +26,7 @@ import {
   type ScrollAcceleration,
 } from "@opentui/core"
 import { Prompt, type PromptRef } from "@tui/component/prompt"
-import type { AssistantMessage, Part, ToolPart, UserMessage, TextPart, ReasoningPart } from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, Part, ToolPart, UserMessage, TextPart, ReasoningPart, Permission } from "@opencode-ai/sdk/v2"
 import { MessageV2 } from "@/session/message-v2"
 import { useLocal } from "@tui/context/local"
 import { Locale } from "@/util/locale"
@@ -102,68 +102,6 @@ function use() {
   return ctx
 }
 
-/**
- * Renders a pending permission using the same UI as ToolPart (REQ-AGT-005)
- * Used to show sub-agent permissions in parent session
- */
-function PendingPermission(props: { permission: import("@opencode-ai/sdk/v2").Permission; isFirst: boolean }) {
-  const { theme } = useTheme()
-
-  // Use the tool's registered render or GenericTool
-  const render = ToolRegistry.render(props.permission.type) ?? GenericTool
-
-  // Get sub-agent name if available
-  const subAgentName = () => {
-    const perm = props.permission as any
-    if (perm.agentName) return perm.agentName
-    return "sub-agent"
-  }
-
-  return (
-    <box
-      flexShrink={0}
-      border={props.isFirst ? ["left", "right"] : ["left"]}
-      borderColor={props.isFirst ? theme.warning : theme.background}
-      backgroundColor={theme.backgroundPanel}
-      paddingTop={1}
-      paddingBottom={1}
-      paddingLeft={2}
-      marginTop={1}
-      gap={1}
-      customBorderChars={SplitBorder.customBorderChars}
-    >
-      <text fg={theme.textMuted}>
-        from <span style={{ fg: theme.accent }}>{subAgentName()}</span>
-      </text>
-      <Dynamic
-        component={render}
-        input={props.permission.metadata}
-        tool={props.permission.type}
-        metadata={props.permission.metadata}
-        permission={props.permission.metadata}
-        output={undefined}
-      />
-      <box gap={1}>
-        <text fg={theme.text}>Permission required to run this tool:</text>
-        <box flexDirection="row" gap={2}>
-          <text fg={theme.text}>
-            <b>enter</b>
-            <span style={{ fg: theme.textMuted }}> accept</span>
-          </text>
-          <text fg={theme.text}>
-            <b>a</b>
-            <span style={{ fg: theme.textMuted }}> accept always</span>
-          </text>
-          <text fg={theme.text}>
-            <b>d</b>
-            <span style={{ fg: theme.textMuted }}> deny</span>
-          </text>
-        </box>
-      </box>
-    </box>
-  )
-}
-
 export function Session() {
   const route = useRouteData("session")
   const { navigate } = useRoute()
@@ -174,33 +112,13 @@ export function Session() {
   const session = createMemo(() => sync.session.get(route.sessionID)!)
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
 
-  // Find root session by traversing parent chain
-  // Permissions bubble to root, so we need to look there
-  const rootSessionID = createMemo(() => {
-    const currentSession = session()
-    if (!currentSession) return route.sessionID
-
-    // If this session has a parent, traverse up to find root
-    let current = currentSession
-    while (current?.parentID) {
-      const parent = sync.session.get(current.parentID)
-      if (!parent) break
-      current = parent
-    }
-    return current?.id ?? route.sessionID
-  })
-
-  // Look up permissions from ROOT session (where they bubble to)
-  // Also check current session as fallback
+  // Permissions are stored under the ROOT/parent session
+  // So both parent and child views look at the parent's permissions
   const permissions = createMemo(() => {
-    const rootID = rootSessionID()
-    const rootPerms = sync.data.permission[rootID] ?? []
-    const currentPerms = sync.data.permission[route.sessionID] ?? []
-
-    // If we're at root, just return root permissions
-    if (rootID === route.sessionID) return rootPerms
-    // Also include any permissions directly under current session (shouldn't happen, but fallback)
-    return [...rootPerms, ...currentPerms]
+    const parentID = session()?.parentID
+    // If we have a parent, look at parent's permissions; otherwise look at our own
+    const targetSessionID = parentID ?? route.sessionID
+    return sync.data.permission[targetSessionID] ?? []
   })
 
   const pending = createMemo(() => {
@@ -1181,13 +1099,9 @@ export function Session() {
                   </Switch>
                 )}
               </For>
-              {/* Pending permissions from sub-agents inline (REQ-AGT-005) */}
-              {/* Only show when viewing parent session - ToolPart handles it in sub-agent */}
-              <For each={permissions().filter((p) => p.sessionID === route.sessionID && (p as any).sourceSessionID)}>
-                {(perm, index) => <PendingPermission permission={perm} isFirst={index() === 0} />}
-              </For>
             </scrollbox>
             <box flexShrink={0}>
+              <PendingPermissions permissions={permissions()} />
               <Prompt
                 ref={(r) => {
                   prompt = r
@@ -1540,27 +1454,17 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
   const sync = useSync()
   const [margin, setMargin] = createSignal(0)
 
-  // Get permissions for this tool - check both the message's session AND the root session
-  // Sub-agent permissions are stored under root session for bubbling
-  const getPermissionsForTool = () => {
-    // First check direct session
-    const directPerms = sync.data.permission[props.message.sessionID] ?? []
-    const directMatch = directPerms.find((x) => x.callID === props.part.callID)
-    if (directMatch) return { permissions: directPerms, permission: directMatch }
-
-    // Check all permissions for ones that match this callID (bubbled from sub-agents)
-    for (const [sessionID, perms] of Object.entries(sync.data.permission)) {
-      const match = perms.find((x) => x.callID === props.part.callID)
-      if (match) return { permissions: perms, permission: match }
-    }
-
-    return { permissions: [], permission: undefined }
-  }
-
   const component = createMemo(() => {
+    // Permissions are stored under the ROOT/parent session
+    // Find the parent session for this message's session
+    const messageSession = sync.data.session.find((s) => s.id === props.message.sessionID)
+    const targetSessionID = messageSession?.parentID ?? props.message.sessionID
+    const permissions = sync.data.permission[targetSessionID] ?? []
+    const permissionIndex = permissions.findIndex((x) => x.callID === props.part.callID)
+    const permission = permissions[permissionIndex]
+
     // Hide tool if showDetails is false and tool completed successfully
     // But always show if there's an error or permission is required
-    const { permissions, permission } = getPermissionsForTool()
     const shouldHide =
       !showDetails() &&
       props.part.state.status === "completed" &&
@@ -1575,7 +1479,6 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
     const metadata = props.part.state.status === "pending" ? {} : (props.part.state.metadata ?? {})
     const input = props.part.state.input ?? {}
     const container = ToolRegistry.container(props.part.tool)
-    const permissionIndex = permission ? permissions.indexOf(permission) : -1
 
     const style: BoxProps =
       container === "block" || permission
@@ -1634,30 +1537,54 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
             <text fg={theme.error}>{props.part.state.error.replace("Error: ", "")}</text>
           </box>
         )}
-        {permission && (
-          <box gap={1}>
-            <text fg={theme.text}>Permission required to run this tool:</text>
-            <box flexDirection="row" gap={2}>
-              <text fg={theme.text}>
-                <b>enter</b>
-                <span style={{ fg: theme.textMuted }}> accept</span>
-              </text>
-              <text fg={theme.text}>
-                <b>a</b>
-                <span style={{ fg: theme.textMuted }}> accept always</span>
-              </text>
-              <text fg={theme.text}>
-                <b>d</b>
-                <span style={{ fg: theme.textMuted }}> deny</span>
-              </text>
-            </box>
-          </box>
-        )}
       </box>
     )
   })
 
   return <Show when={component()}>{component()}</Show>
+}
+
+/**
+ * Standalone pending permission UI - shows permissions even when the tool call
+ * is in a sub-agent session. This allows the parent session to see and respond
+ * to sub-agent permissions. Uses the same UI as the inline ToolPart permission.
+ */
+function PendingPermissions(props: { permissions: Permission[] }) {
+  const { theme } = useTheme()
+
+  return (
+    <Show when={props.permissions.length > 0}>
+      <box
+        border={["left", "right"]}
+        paddingTop={1}
+        paddingBottom={1}
+        paddingLeft={2}
+        marginTop={1}
+        gap={1}
+        backgroundColor={theme.backgroundPanel}
+        customBorderChars={SplitBorder.customBorderChars}
+        borderColor={theme.warning}
+      >
+        <text fg={theme.text}>
+          Permission required: <b>{props.permissions[0].title}</b>
+        </text>
+        <box flexDirection="row" gap={2}>
+          <text fg={theme.text}>
+            <b>enter</b>
+            <span style={{ fg: theme.textMuted }}> accept</span>
+          </text>
+          <text fg={theme.text}>
+            <b>a</b>
+            <span style={{ fg: theme.textMuted }}> accept always</span>
+          </text>
+          <text fg={theme.text}>
+            <b>d</b>
+            <span style={{ fg: theme.textMuted }}> deny</span>
+          </text>
+        </box>
+      </box>
+    </Show>
+  )
 }
 
 type ToolProps<T extends Tool.Info> = {
@@ -1761,7 +1688,7 @@ ToolRegistry.register<typeof WriteTool>({
       return props.metadata.diagnostics?.[filePath] ?? []
     })
 
-    const done = props.part?.state?.status === "completed" && !!props.input.filePath
+    const done = props.output !== undefined && !!props.input.filePath
 
     return (
       <>

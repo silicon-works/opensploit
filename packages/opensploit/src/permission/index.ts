@@ -6,7 +6,7 @@ import { Identifier } from "../id/id"
 import { Plugin } from "../plugin"
 import { Instance } from "../project/instance"
 import { Wildcard } from "../util/wildcard"
-import { getRootSession, hasParent } from "../session/hierarchy"
+import { getRootSession } from "../session/hierarchy"
 
 export namespace Permission {
   const log = Log.create({ service: "permission" })
@@ -33,9 +33,6 @@ export namespace Permission {
       time: z.object({
         created: z.number(),
       }),
-      // For sub-agent permissions (display context only)
-      sourceSessionID: z.string().optional(), // Original sub-agent session (if different from sessionID)
-      agentName: z.string().optional(), // Name of the sub-agent
     })
     .meta({
       ref: "Permission",
@@ -98,24 +95,14 @@ export namespace Permission {
     sessionID: Info["sessionID"]
     messageID: Info["messageID"]
     metadata: Info["metadata"]
-    agentName?: string // Optional agent name for sub-agents
   }) {
     const { pending, approved } = state()
 
-    // Sub-agents use root session for permissions - simple delegation
-    const effectiveSessionID = getRootSession(input.sessionID)
-    const isSubAgent = effectiveSessionID !== input.sessionID
+    // Store permission under ROOT session (parent) so it shows in parent view
+    const rootSessionID = getRootSession(input.sessionID)
 
-    log.info("permission.ask", {
-      inputSessionID: input.sessionID.slice(-8),
-      effectiveSessionID: effectiveSessionID.slice(-8),
-      isSubAgent,
-      type: input.type,
-      pattern: input.pattern,
-    })
-
-    // Check approvals against the effective session (root for sub-agents)
-    const approvedForSession = approved[effectiveSessionID] || {}
+    // Check approvals against root session
+    const approvedForSession = approved[rootSessionID] || {}
     const keys = toKeys(input.pattern, input.type)
     if (covered(keys, approvedForSession)) return
 
@@ -123,7 +110,7 @@ export namespace Permission {
       id: Identifier.ascending("permission"),
       type: input.type,
       pattern: input.pattern,
-      sessionID: effectiveSessionID, // Use root session for sub-agents
+      sessionID: rootSessionID, // Store under parent session
       messageID: input.messageID,
       callID: input.callID,
       title: input.title,
@@ -131,9 +118,6 @@ export namespace Permission {
       time: {
         created: Date.now(),
       },
-      // Track original session for context (display only)
-      sourceSessionID: isSubAgent ? input.sessionID : undefined,
-      agentName: input.agentName,
     }
 
     switch (
@@ -147,17 +131,10 @@ export namespace Permission {
         return
     }
 
-    // Store under effective session only - no dual storage
-    pending[effectiveSessionID] = pending[effectiveSessionID] || {}
+    pending[rootSessionID] = pending[rootSessionID] || {}
 
     return new Promise<void>((resolve, reject) => {
-      pending[effectiveSessionID][info.id] = { info, resolve, reject }
-      log.info("permission.publish", {
-        sessionID: effectiveSessionID.slice(-8),
-        permissionID: info.id,
-        type: info.type,
-        pendingCount: Object.keys(pending[effectiveSessionID]).length,
-      })
+      pending[rootSessionID][info.id] = { info, resolve, reject }
       Bus.publish(Event.Updated, info)
     })
   }
