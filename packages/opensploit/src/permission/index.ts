@@ -69,9 +69,15 @@ export namespace Permission {
         }
       } = {}
 
+      // Ultrasploit mode - auto-approve all permissions for a session tree
+      const ultrasploit: {
+        [sessionID: string]: boolean
+      } = {}
+
       return {
         pending,
         approved,
+        ultrasploit,
       }
     },
     async (state) => {
@@ -87,6 +93,32 @@ export namespace Permission {
     return state().pending
   }
 
+  /**
+   * Enable ultrasploit mode for a session tree - auto-approves all permissions
+   */
+  export function enableUltrasploit(sessionID: string): void {
+    const rootSessionID = getRootSession(sessionID)
+    state().ultrasploit[rootSessionID] = true
+    log.info("ultrasploit enabled", { sessionID, rootSessionID })
+  }
+
+  /**
+   * Disable ultrasploit mode for a session tree
+   */
+  export function disableUltrasploit(sessionID: string): void {
+    const rootSessionID = getRootSession(sessionID)
+    delete state().ultrasploit[rootSessionID]
+    log.info("ultrasploit disabled", { sessionID, rootSessionID })
+  }
+
+  /**
+   * Check if ultrasploit mode is enabled for a session
+   */
+  export function isUltrasploit(sessionID: string): boolean {
+    const rootSessionID = getRootSession(sessionID)
+    return state().ultrasploit[rootSessionID] === true
+  }
+
   export async function ask(input: {
     type: Info["type"]
     title: Info["title"]
@@ -96,10 +128,16 @@ export namespace Permission {
     messageID: Info["messageID"]
     metadata: Info["metadata"]
   }) {
-    const { pending, approved } = state()
+    const { pending, approved, ultrasploit } = state()
 
     // Store permission under ROOT session (parent) so it shows in parent view
     const rootSessionID = getRootSession(input.sessionID)
+
+    // Ultrasploit mode - auto-approve all permissions
+    if (ultrasploit[rootSessionID]) {
+      log.info("ultrasploit auto-approved", { type: input.type, title: input.title, rootSessionID })
+      return
+    }
 
     // Check approvals against root session
     const approvedForSession = approved[rootSessionID] || {}

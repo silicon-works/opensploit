@@ -640,6 +640,84 @@ function getSyntaxRules(theme: Theme) {
         bold: true,
       },
     },
+    // Ultrasploit rainbow colors (10 letters)
+    {
+      scope: ["extmark.ultrasploit.0"], // u - red
+      style: {
+        foreground: RGBA.fromHex("#ff0000"),
+        bold: true,
+      },
+    },
+    {
+      scope: ["extmark.ultrasploit.1"], // l - orange
+      style: {
+        foreground: RGBA.fromHex("#ff7f00"),
+        bold: true,
+      },
+    },
+    {
+      scope: ["extmark.ultrasploit.2"], // t - yellow
+      style: {
+        foreground: RGBA.fromHex("#ffff00"),
+        bold: true,
+      },
+    },
+    {
+      scope: ["extmark.ultrasploit.3"], // r - lime
+      style: {
+        foreground: RGBA.fromHex("#7fff00"),
+        bold: true,
+      },
+    },
+    {
+      scope: ["extmark.ultrasploit.4"], // a - green
+      style: {
+        foreground: RGBA.fromHex("#00ff00"),
+        bold: true,
+      },
+    },
+    {
+      scope: ["extmark.ultrasploit.5"], // s - cyan
+      style: {
+        foreground: RGBA.fromHex("#00ffff"),
+        bold: true,
+      },
+    },
+    {
+      scope: ["extmark.ultrasploit.6"], // p - blue
+      style: {
+        foreground: RGBA.fromHex("#0080ff"),
+        bold: true,
+      },
+    },
+    {
+      scope: ["extmark.ultrasploit.7"], // l - purple
+      style: {
+        foreground: RGBA.fromHex("#8000ff"),
+        bold: true,
+      },
+    },
+    {
+      scope: ["extmark.ultrasploit.8"], // o - magenta
+      style: {
+        foreground: RGBA.fromHex("#ff00ff"),
+        bold: true,
+      },
+    },
+    {
+      scope: ["extmark.ultrasploit.9"], // i - pink
+      style: {
+        foreground: RGBA.fromHex("#ff0080"),
+        bold: true,
+      },
+    },
+    {
+      scope: ["extmark.ultrasploit.10"], // t - back to red (for 11 letters: ultrasploit)
+      style: {
+        foreground: RGBA.fromHex("#ff0000"),
+        bold: true,
+      },
+    },
     {
       scope: ["comment"],
       style: {

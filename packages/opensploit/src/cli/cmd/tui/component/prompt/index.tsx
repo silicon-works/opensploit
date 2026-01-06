@@ -149,7 +149,12 @@ export function Prompt(props: PromptProps) {
   const fileStyleId = syntax().getStyleId("extmark.file")!
   const agentStyleId = syntax().getStyleId("extmark.agent")!
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
+  // Rainbow colors for "ultrasploit" (11 letters)
+  const ultrasploitStyleIds = Array.from({ length: 11 }, (_, i) =>
+    syntax().getStyleId(`extmark.ultrasploit.${i}`)!
+  )
   let promptPartTypeId: number
+  let ultrasploitTypeId: number
 
   command.register(() => {
     return [
@@ -348,7 +353,38 @@ export function Prompt(props: PromptProps) {
 
   onMount(() => {
     promptPartTypeId = input.extmarks.registerType("prompt-part")
+    ultrasploitTypeId = input.extmarks.registerType("ultrasploit-rainbow")
   })
+
+  /**
+   * Updates ultrasploit rainbow extmarks in the textarea.
+   * Detects all occurrences of "ultrasploit" (case-insensitive) and applies
+   * rainbow colors to each character.
+   */
+  function updateUltrasploitExtmarks(text: string) {
+    // Clear existing ultrasploit extmarks
+    const existing = input.extmarks.getAllForTypeId(ultrasploitTypeId)
+    for (const extmark of existing) {
+      input.extmarks.delete(extmark.id)
+    }
+
+    // Find all occurrences of "ultrasploit" (case-insensitive)
+    const regex = /ultrasploit/gi
+    let match: RegExpExecArray | null
+    while ((match = regex.exec(text)) !== null) {
+      const startIndex = match.index
+      // Create extmarks for each character with cycling rainbow colors
+      for (let i = 0; i < match[0].length; i++) {
+        input.extmarks.create({
+          start: startIndex + i,
+          end: startIndex + i + 1,
+          virtual: false,
+          styleId: ultrasploitStyleIds[i % ultrasploitStyleIds.length],
+          typeId: ultrasploitTypeId,
+        })
+      }
+    }
+  }
 
   function restoreExtmarksFromParts(parts: PromptInfo["parts"]) {
     input.extmarks.clear()
@@ -732,6 +768,7 @@ export function Prompt(props: PromptProps) {
                 setStore("prompt", "input", value)
                 autocomplete.onInput(value)
                 syncExtmarksWithPromptParts()
+                updateUltrasploitExtmarks(value)
               }}
               keyBindings={textareaKeybindings()}
               onKeyDown={async (e) => {

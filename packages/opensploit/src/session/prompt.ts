@@ -38,6 +38,7 @@ import { SessionSummary } from "./summary"
 import { NamedError } from "@opencode-ai/util/error"
 import { fn } from "@/util/fn"
 import { SessionProcessor } from "./processor"
+import { Permission } from "../permission"
 import { TaskTool } from "@/tool/task"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
@@ -263,6 +264,21 @@ export namespace SessionPrompt {
       }
 
       if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
+
+      // Check for ultrasploit keyword in user message (only on first step)
+      if (step === 0) {
+        const userMsg = msgs.find((m) => m.info.id === lastUser!.id)
+        if (userMsg) {
+          const hasUltrasploit = userMsg.parts.some(
+            (p) => p.type === "text" && /\bultrasploit\b/i.test(p.text)
+          )
+          if (hasUltrasploit && !Permission.isUltrasploit(sessionID)) {
+            Permission.enableUltrasploit(sessionID)
+            log.info("ultrasploit mode activated", { sessionID })
+          }
+        }
+      }
+
       if (
         lastAssistant?.finish &&
         !["tool-calls", "unknown"].includes(lastAssistant.finish) &&

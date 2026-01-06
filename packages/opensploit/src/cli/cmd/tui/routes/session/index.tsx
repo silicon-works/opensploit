@@ -1156,6 +1156,72 @@ const MIME_BADGE: Record<string, string> = {
   "application/x-directory": "dir",
 }
 
+// Rainbow colors for "ultrasploit" (11 letters)
+const ULTRASPLOIT_RAINBOW = [
+  "#ff0000", // u - red
+  "#ff7f00", // l - orange
+  "#ffff00", // t - yellow
+  "#7fff00", // r - lime
+  "#00ff00", // a - green
+  "#00ffff", // s - cyan
+  "#0080ff", // p - blue
+  "#8000ff", // l - purple
+  "#ff00ff", // o - magenta
+  "#ff0080", // i - pink
+  "#ff0000", // t - red again
+]
+
+/**
+ * Renders text with "ultrasploit" highlighted in rainbow colors
+ */
+function UltrasploitText(props: { text: string; theme: any }) {
+  const parts = createMemo(() => {
+    const regex = /\b(ultrasploit)\b/gi
+    const result: Array<{ text: string; highlight: boolean }> = []
+    let lastIndex = 0
+    let match
+
+    const text = props.text
+    regex.lastIndex = 0
+
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        result.push({ text: text.slice(lastIndex, match.index), highlight: false })
+      }
+      result.push({ text: match[0], highlight: true })
+      lastIndex = regex.lastIndex
+    }
+
+    if (lastIndex < text.length) {
+      result.push({ text: text.slice(lastIndex), highlight: false })
+    }
+
+    return result.length > 0 ? result : [{ text, highlight: false }]
+  })
+
+  return (
+    <text fg={props.theme.text}>
+      <For each={parts()}>
+        {(part) =>
+          part.highlight ? (
+            <>
+              <For each={part.text.split("")}>
+                {(char, i) => (
+                  <span style={{ fg: ULTRASPLOIT_RAINBOW[i() % ULTRASPLOIT_RAINBOW.length] }}>
+                    <b>{char}</b>
+                  </span>
+                )}
+              </For>
+            </>
+          ) : (
+            <span>{part.text}</span>
+          )
+        }
+      </For>
+    </text>
+  )
+}
+
 function UserMessage(props: {
   message: UserMessage
   parts: Part[]
@@ -1171,7 +1237,11 @@ function UserMessage(props: {
   const { theme, syntax } = useTheme()
   const [hover, setHover] = createSignal(false)
   const queued = createMemo(() => props.pending && props.message.id > props.pending)
-  const color = createMemo(() => (queued() ? theme.accent : local.agent.color(props.message.agent)))
+  const hasUltrasploit = createMemo(() => /\bultrasploit\b/i.test(text()?.text ?? ""))
+  const color = createMemo(() => {
+    if (hasUltrasploit()) return "#ff00ff" // Magenta for ultrasploit
+    return queued() ? theme.accent : local.agent.color(props.message.agent)
+  })
 
   const compaction = createMemo(() => props.parts.find((x) => x.type === "compaction"))
 
@@ -1212,7 +1282,7 @@ function UserMessage(props: {
                 />
               </Match>
               <Match when={!ctx.userMessageMarkdown()}>
-                <text fg={theme.text}>{text()?.text}</text>
+                <UltrasploitText text={text()?.text ?? ""} theme={theme} />
               </Match>
             </Switch>
             <Show when={files().length}>
