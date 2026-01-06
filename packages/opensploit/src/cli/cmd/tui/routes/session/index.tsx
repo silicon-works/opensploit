@@ -1156,19 +1156,19 @@ const MIME_BADGE: Record<string, string> = {
   "application/x-directory": "dir",
 }
 
-// Rainbow colors for "ultrasploit" (11 letters)
+// Rainbow colors for "ultrasploit" (11 letters) - softer, more pleasing shades
 const ULTRASPLOIT_RAINBOW = [
-  "#ff0000", // u - red
-  "#ff7f00", // l - orange
-  "#ffff00", // t - yellow
-  "#7fff00", // r - lime
-  "#00ff00", // a - green
-  "#00ffff", // s - cyan
-  "#0080ff", // p - blue
-  "#8000ff", // l - purple
-  "#ff00ff", // o - magenta
-  "#ff0080", // i - pink
-  "#ff0000", // t - red again
+  "#ff6b6b", // u - coral red
+  "#ffa94d", // l - orange
+  "#ffd43b", // t - gold
+  "#a9e34b", // r - lime green
+  "#69db7c", // a - mint
+  "#38d9a9", // s - teal
+  "#4dabf7", // p - cyan
+  "#748ffc", // l - blue
+  "#9775fa", // o - purple
+  "#da77f2", // i - violet
+  "#f783ac", // t - pink
 ]
 
 /**
@@ -1270,6 +1270,10 @@ function UserMessage(props: {
             flexShrink={0}
           >
             <Switch>
+              <Match when={hasUltrasploit()}>
+                {/* Always use rainbow text when ultrasploit is present */}
+                <UltrasploitText text={text()?.text ?? ""} theme={theme} />
+              </Match>
               <Match when={ctx.userMessageMarkdown()}>
                 <code
                   filetype="markdown"

@@ -640,81 +640,81 @@ function getSyntaxRules(theme: Theme) {
         bold: true,
       },
     },
-    // Ultrasploit rainbow colors (10 letters)
+    // Ultrasploit rainbow colors (11 letters) - softer, more pleasing shades
     {
-      scope: ["extmark.ultrasploit.0"], // u - red
+      scope: ["extmark.ultrasploit.0"], // u - coral red
       style: {
-        foreground: RGBA.fromHex("#ff0000"),
+        foreground: RGBA.fromHex("#ff6b6b"),
         bold: true,
       },
     },
     {
       scope: ["extmark.ultrasploit.1"], // l - orange
       style: {
-        foreground: RGBA.fromHex("#ff7f00"),
+        foreground: RGBA.fromHex("#ffa94d"),
         bold: true,
       },
     },
     {
-      scope: ["extmark.ultrasploit.2"], // t - yellow
+      scope: ["extmark.ultrasploit.2"], // t - gold
       style: {
-        foreground: RGBA.fromHex("#ffff00"),
+        foreground: RGBA.fromHex("#ffd43b"),
         bold: true,
       },
     },
     {
-      scope: ["extmark.ultrasploit.3"], // r - lime
+      scope: ["extmark.ultrasploit.3"], // r - lime green
       style: {
-        foreground: RGBA.fromHex("#7fff00"),
+        foreground: RGBA.fromHex("#a9e34b"),
         bold: true,
       },
     },
     {
-      scope: ["extmark.ultrasploit.4"], // a - green
+      scope: ["extmark.ultrasploit.4"], // a - mint
       style: {
-        foreground: RGBA.fromHex("#00ff00"),
+        foreground: RGBA.fromHex("#69db7c"),
         bold: true,
       },
     },
     {
-      scope: ["extmark.ultrasploit.5"], // s - cyan
+      scope: ["extmark.ultrasploit.5"], // s - teal
       style: {
-        foreground: RGBA.fromHex("#00ffff"),
+        foreground: RGBA.fromHex("#38d9a9"),
         bold: true,
       },
     },
     {
-      scope: ["extmark.ultrasploit.6"], // p - blue
+      scope: ["extmark.ultrasploit.6"], // p - cyan
       style: {
-        foreground: RGBA.fromHex("#0080ff"),
+        foreground: RGBA.fromHex("#4dabf7"),
         bold: true,
       },
     },
     {
-      scope: ["extmark.ultrasploit.7"], // l - purple
+      scope: ["extmark.ultrasploit.7"], // l - blue
       style: {
-        foreground: RGBA.fromHex("#8000ff"),
+        foreground: RGBA.fromHex("#748ffc"),
         bold: true,
       },
     },
     {
-      scope: ["extmark.ultrasploit.8"], // o - magenta
+      scope: ["extmark.ultrasploit.8"], // o - purple
       style: {
-        foreground: RGBA.fromHex("#ff00ff"),
+        foreground: RGBA.fromHex("#9775fa"),
         bold: true,
       },
     },
     {
-      scope: ["extmark.ultrasploit.9"], // i - pink
+      scope: ["extmark.ultrasploit.9"], // i - violet
       style: {
-        foreground: RGBA.fromHex("#ff0080"),
+        foreground: RGBA.fromHex("#da77f2"),
         bold: true,
       },
     },
     {
-      scope: ["extmark.ultrasploit.10"], // t - back to red (for 11 letters: ultrasploit)
+      scope: ["extmark.ultrasploit.10"], // t - pink
       style: {
-        foreground: RGBA.fromHex("#ff0000"),
+        foreground: RGBA.fromHex("#f783ac"),
         bold: true,
       },
     },
