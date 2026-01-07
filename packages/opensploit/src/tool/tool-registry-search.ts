@@ -766,9 +766,74 @@ export const ToolRegistrySearchTool = Tool.define("tool_registry_search", {
       .describe("Filter by pentest phase - affects ranking and shows phase-appropriate tools"),
     capability: z.string().optional().describe("Filter by specific capability (e.g., 'port_scanning', 'sql_injection')"),
     limit: z.number().optional().default(5).describe("Maximum number of results to return"),
+    list_all: z.boolean().optional().default(false).describe("List ALL available tools (ignores query, returns comprehensive list)"),
   }),
   async execute(params, _ctx) {
-    const { query, phase, capability, limit = 5 } = params
+    const { query, phase, capability, limit = 5, list_all = false } = params
+
+    // Handle list_all mode - returns all tools grouped by category
+    if (list_all) {
+      log.info("listing all tools")
+      const registry = await getRegistry()
+
+      let output = `# All Available MCP Tools\n\n`
+      output += `**Registry Version:** ${registry.version}\n`
+      output += `**Total Tools:** ${Object.keys(registry.tools).length}\n`
+      output += `**Total Skills:** ${Object.keys(registry.skills).length}\n\n`
+
+      // Group tools by phase
+      const toolsByPhase: Record<string, ToolEntry[]> = {
+        reconnaissance: [],
+        enumeration: [],
+        exploitation: [],
+        "post-exploitation": [],
+        multi: [],
+      }
+
+      for (const tool of Object.values(registry.tools)) {
+        if (tool.phases.length === 0 || tool.phases.length > 2) {
+          toolsByPhase["multi"].push(tool)
+        } else {
+          for (const p of tool.phases) {
+            if (toolsByPhase[p]) {
+              toolsByPhase[p].push(tool)
+            }
+          }
+        }
+      }
+
+      // Output skills first
+      if (Object.keys(registry.skills).length > 0) {
+        output += `## Skills (Level 1 - Highest Priority)\n\n`
+        for (const [name, skill] of Object.entries(registry.skills)) {
+          output += `- **${name}**: ${skill.description}\n`
+        }
+        output += `\n`
+      }
+
+      // Output tools by phase
+      for (const [phaseName, tools] of Object.entries(toolsByPhase)) {
+        if (tools.length === 0) continue
+        output += `## ${phaseName.charAt(0).toUpperCase() + phaseName.slice(1)} Tools\n\n`
+        for (const tool of tools) {
+          const levelLabels: Record<number, string> = { 1: "SKILL", 2: "SPECIALIZED", 3: "GENERAL" }
+          output += `- **${tool.name}** [${levelLabels[tool.selection_level] || "L" + tool.selection_level}]: ${tool.description}\n`
+        }
+        output += `\n`
+      }
+
+      output += `---\n\n`
+      output += `*Use \`tool_registry_search\` with a specific query to get detailed information about a tool.*\n`
+
+      return {
+        output,
+        title: `All tools (${Object.keys(registry.tools).length} tools, ${Object.keys(registry.skills).length} skills)`,
+        metadata: {
+          results: Object.keys(registry.tools).length + Object.keys(registry.skills).length,
+          registry_version: registry.version,
+        },
+      }
+    }
 
     log.info("searching tool registry", { query, phase, capability })
 
