@@ -22,6 +22,7 @@ import PROMPT_PENTEST_ENUM from "./prompt/pentest/enum.txt"
 import PROMPT_PENTEST_EXPLOIT from "./prompt/pentest/exploit.txt"
 import PROMPT_PENTEST_POST_EXPLOIT from "./prompt/pentest/post-exploit.txt"
 import PROMPT_PENTEST_REPORT from "./prompt/pentest/report.txt"
+import PROMPT_PENTEST_RESEARCH from "./prompt/pentest/research.txt"
 
 export namespace Agent {
   export const Info = z
@@ -416,6 +417,52 @@ export namespace Agent {
         },
         options: {},
         permission: pentestReportPermission,
+      },
+
+      // Research/OSINT subagent - utility agent for context-isolated web research
+      "pentest/research": {
+        name: "pentest/research",
+        description:
+          "OSINT and research specialist. Searches for HTB writeups, CVE details, exploit code, and default credentials. Returns concise summaries without polluting parent context. Use for any web research during pentests.",
+        mode: "subagent",
+        native: true,
+        color: "#1abc9c",
+        prompt: PROMPT_PENTEST_RESEARCH,
+        tools: {
+          // Core research tools
+          webfetch: true,
+          websearch: true,
+          read: true,
+          glob: true,
+          grep: true,
+          // MCP tools for CVE lookup and exploit search
+          tool_registry_search: true,
+          mcp_tool: true,
+          read_tool_output: true,
+          // Can delegate to general for complex sub-tasks (per REQ-ARC-013)
+          task: true,
+          // Disable tools that could cause side effects
+          write: false,
+          edit: false,
+          bash: false,
+          todowrite: false,
+          todoread: false,
+        },
+        options: {},
+        permission: mergeAgentPermissions(
+          {
+            edit: "deny",
+            bash: {
+              "*": "deny",
+            },
+            skill: {
+              "*": "deny",
+            },
+            webfetch: "allow", // Research agent can fetch without asking
+            external_directory: "allow",
+          },
+          cfg.permission ?? {},
+        ),
       },
     }
     for (const [key, value] of Object.entries(cfg.agent ?? {})) {

@@ -4,6 +4,8 @@ import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
 import { Config } from "../config/config"
 import { Permission } from "../permission"
+import { Readability } from "@mozilla/readability"
+import { parseHTML } from "linkedom"
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
@@ -17,6 +19,13 @@ export const WebFetchTool = Tool.define("webfetch", {
       .enum(["text", "markdown", "html"])
       .describe("The format to return the content in (text, markdown, or html)"),
     timeout: z.number().describe("Optional timeout in seconds (max 120)").optional(),
+    extract_main_content: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe(
+        "Use Readability to extract only the main article content, removing navigation, headers, footers, ads, etc. Highly recommended for cleaner output.",
+      ),
   }),
   async execute(params, ctx) {
     // Validate URL
@@ -97,50 +106,181 @@ export const WebFetchTool = Tool.define("webfetch", {
     switch (params.format) {
       case "markdown":
         if (contentType.includes("text/html")) {
-          const markdown = convertHTMLToMarkdown(content)
+          // Use Readability extraction if enabled
+          const htmlToProcess = params.extract_main_content ? extractMainContent(content, params.url) : content
+          const markdown = convertHTMLToMarkdown(htmlToProcess)
           return {
             output: markdown,
             title,
-            metadata: {},
+            metadata: {
+              readability_extracted: params.extract_main_content,
+            },
           }
         }
         return {
           output: content,
           title,
-          metadata: {},
+          metadata: {
+            readability_extracted: false,
+          },
         }
 
       case "text":
         if (contentType.includes("text/html")) {
-          const text = await extractTextFromHTML(content)
+          // Use Readability extraction if enabled
+          const htmlToProcess = params.extract_main_content ? extractMainContent(content, params.url) : content
+          const text = await extractTextFromHTML(htmlToProcess)
           return {
             output: text,
             title,
-            metadata: {},
+            metadata: {
+              readability_extracted: params.extract_main_content,
+            },
           }
         }
         return {
           output: content,
           title,
-          metadata: {},
+          metadata: {
+            readability_extracted: false,
+          },
         }
 
       case "html":
+        if (params.extract_main_content && contentType.includes("text/html")) {
+          const cleanedHtml = extractMainContent(content, params.url)
+          return {
+            output: cleanedHtml,
+            title,
+            metadata: {
+              readability_extracted: true,
+            },
+          }
+        }
         return {
           output: content,
           title,
-          metadata: {},
+          metadata: {
+            readability_extracted: false,
+          },
         }
 
       default:
         return {
           output: content,
           title,
-          metadata: {},
+          metadata: {
+            readability_extracted: false,
+          },
         }
     }
   },
 })
+
+/**
+ * Extract main article content using Mozilla's Readability algorithm.
+ * This removes navigation, headers, footers, sidebars, ads, etc.
+ * and returns only the primary content of the page.
+ */
+function extractMainContent(html: string, url: string): string {
+  try {
+    const { document } = parseHTML(html)
+
+    // Set the document URL for Readability
+    // This helps with resolving relative URLs
+    const baseUrl = new URL(url)
+
+    // Clone the document for Readability (it modifies the DOM)
+    const reader = new Readability(document as unknown as Document, {
+      charThreshold: 50, // Lower threshold to catch smaller articles
+      keepClasses: true, // Keep classes for code highlighting
+    })
+
+    const article = reader.parse()
+
+    if (article && article.content) {
+      // Build a clean HTML structure with the extracted content
+      const cleanHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>${article.title || "Article"}</title>
+  <base href="${baseUrl.origin}">
+</head>
+<body>
+  <article>
+    <h1>${article.title || ""}</h1>
+    ${article.byline ? `<p class="byline">${article.byline}</p>` : ""}
+    ${article.content}
+  </article>
+</body>
+</html>`
+      return cleanHtml
+    }
+
+    // If Readability couldn't extract content, try fallback extraction
+    return fallbackExtraction(html)
+  } catch (error) {
+    // If Readability fails, return original HTML
+    console.error("Readability extraction failed:", error)
+    return html
+  }
+}
+
+/**
+ * Fallback extraction when Readability can't parse the page.
+ * Tries to extract content from common article containers.
+ */
+function fallbackExtraction(html: string): string {
+  try {
+    const { document } = parseHTML(html)
+
+    // Remove known non-content elements
+    const removeSelectors = [
+      "script",
+      "style",
+      "noscript",
+      "iframe",
+      "nav",
+      "header",
+      "footer",
+      "aside",
+      ".sidebar",
+      ".nav",
+      ".menu",
+      ".advertisement",
+      ".ad",
+      ".ads",
+      ".social-share",
+      ".comments",
+      "#comments",
+      ".related-posts",
+    ]
+
+    for (const selector of removeSelectors) {
+      const elements = document.querySelectorAll(selector)
+      for (const el of elements) {
+        el.remove()
+      }
+    }
+
+    // Try to find main content container
+    const mainSelectors = ["article", "main", ".post-content", ".article-content", ".entry-content", "#content", ".content"]
+
+    for (const selector of mainSelectors) {
+      const main = document.querySelector(selector)
+      if (main && main.textContent && main.textContent.trim().length > 200) {
+        return main.outerHTML || html
+      }
+    }
+
+    // If no main container found, return the body
+    const body = document.querySelector("body")
+    return body?.innerHTML || html
+  } catch {
+    return html
+  }
+}
 
 async function extractTextFromHTML(html: string) {
   let text = ""
