@@ -38,6 +38,7 @@ export namespace EngagementState {
     protocol: "tcp" | "udp"
     service: string
     version?: string
+    banner?: string // Service banner if grabbed
     state: "open" | "filtered" | "closed"
   }
 
@@ -48,8 +49,10 @@ export namespace EngagementState {
     username: string
     password?: string
     hash?: string
+    key?: string // SSH key or similar
     source: string // Where it was found (e.g., "config file", "database dump")
     validated: boolean // Has it been tested?
+    privileged?: boolean // Is this a root/admin account?
     validFor?: string[] // Services it works on
   }
 
@@ -63,6 +66,31 @@ export namespace EngagementState {
     port?: number
     cve?: string
     exploitAvailable: boolean
+    exploited?: boolean // Has this been successfully exploited?
+    accessGained?: "none" | "user" | "root" // What access did exploitation provide?
+    notes?: string
+  }
+
+  /**
+   * Active shell session (REQ-FUN-123)
+   */
+  export interface Session {
+    id: string // Unique identifier for this session
+    type: "ssh" | "reverse" | "webshell" | "meterpreter" | "other"
+    user: string // User the session is running as
+    privileged: boolean // Is this root/admin?
+    target?: string // IP or hostname
+    established: string // ISO timestamp when established
+    notes?: string
+  }
+
+  /**
+   * File of interest found during engagement (REQ-FUN-125)
+   */
+  export interface FileOfInterest {
+    path: string
+    type: "config" | "credential" | "flag" | "suid" | "writable" | "interesting"
+    content?: string // File content if small/relevant
     notes?: string
   }
 
@@ -74,6 +102,8 @@ export namespace EngagementState {
     ports?: Port[]
     credentials?: Credential[]
     vulnerabilities?: Vulnerability[]
+    sessions?: Session[] // Active shell sessions (REQ-FUN-123)
+    files?: FileOfInterest[] // Files of interest found (REQ-FUN-125)
     phase?: "reconnaissance" | "enumeration" | "exploitation" | "post-exploitation" | "reporting"
     notes?: string[]
     flags?: string[] // Captured flags (for CTF)
@@ -136,6 +166,8 @@ export namespace EngagementState {
         updates.vulnerabilities,
         (a, b) => a.name === b.name && a.service === b.service
       ),
+      sessions: mergeArrays(current.sessions, updates.sessions, (a, b) => a.id === b.id),
+      files: mergeArrays(current.files, updates.files, (a, b) => a.path === b.path),
       notes: [...(current.notes || []), ...(updates.notes || [])],
       flags: [...new Set([...(current.flags || []), ...(updates.flags || [])])],
     }
@@ -193,6 +225,20 @@ export namespace EngagementState {
    */
   export function addFlag(sessionID: string, flag: string): void {
     update(sessionID, { flags: [flag] })
+  }
+
+  /**
+   * Add an active session (REQ-FUN-123)
+   */
+  export function addSession(sessionID: string, session: Session): void {
+    update(sessionID, { sessions: [session] })
+  }
+
+  /**
+   * Add a file of interest (REQ-FUN-125)
+   */
+  export function addFile(sessionID: string, file: FileOfInterest): void {
+    update(sessionID, { files: [file] })
   }
 
   /**
@@ -256,9 +302,33 @@ export namespace EngagementState {
       lines.push("### Vulnerabilities Identified")
       for (const v of state.vulnerabilities) {
         const exploit = v.exploitAvailable ? "exploit available" : "no exploit"
+        const exploited = v.exploited ? " **[EXPLOITED]**" : ""
+        const access = v.accessGained && v.accessGained !== "none" ? ` → ${v.accessGained} access` : ""
         const cve = v.cve ? ` (${v.cve})` : ""
-        lines.push(`- [**${v.severity.toUpperCase()}**] ${v.name} on ${v.service}${v.port ? `:${v.port}` : ""}${cve} - ${exploit}`)
+        lines.push(`- [**${v.severity.toUpperCase()}**] ${v.name} on ${v.service}${v.port ? `:${v.port}` : ""}${cve} - ${exploit}${exploited}${access}`)
         if (v.notes) lines.push(`  - ${v.notes}`)
+      }
+      lines.push("")
+    }
+
+    // Active sessions
+    if (state.sessions?.length) {
+      lines.push("### Active Sessions")
+      for (const s of state.sessions) {
+        const priv = s.privileged ? "**privileged**" : "unprivileged"
+        const target = s.target ? ` on ${s.target}` : ""
+        lines.push(`- [${s.id}] ${s.type} as \`${s.user}\` (${priv})${target}`)
+        if (s.notes) lines.push(`  - ${s.notes}`)
+      }
+      lines.push("")
+    }
+
+    // Files of interest
+    if (state.files?.length) {
+      lines.push("### Files of Interest")
+      for (const f of state.files) {
+        lines.push(`- [${f.type}] \`${f.path}\``)
+        if (f.notes) lines.push(`  - ${f.notes}`)
       }
       lines.push("")
     }
