@@ -76,6 +76,7 @@
     "@opencode-ai/plugin": "workspace:*",
     "@opencode-ai/script": "workspace:*",
     "@opencode-ai/sdk": "workspace:*",
+    "opencode-gemini-auth": "1.3.7",
     "typescript": "catalog:"
   },
   "repository": {
