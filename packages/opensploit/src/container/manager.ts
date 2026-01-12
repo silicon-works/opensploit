@@ -10,6 +10,67 @@ const log = Log.create({ service: "container" })
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes idle timeout
 const CLEANUP_INTERVAL_MS = 30 * 1000 // Check every 30 seconds
 
+// Retry settings with exponential backoff
+const MAX_RETRIES = 3
+const INITIAL_RETRY_DELAY_MS = 1000 // 1 second
+const MAX_RETRY_DELAY_MS = 10000 // 10 seconds
+
+/**
+ * Sleep for a specified number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Calculate delay for exponential backoff
+ */
+function calculateRetryDelay(attempt: number): number {
+  const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1)
+  return Math.min(delay, MAX_RETRY_DELAY_MS)
+}
+
+/**
+ * Classify error type for better error messages
+ */
+function classifyConnectionError(error: unknown): {
+  type: "timeout" | "refused" | "network" | "unknown"
+  message: string
+  suggestion: string
+} {
+  const errorStr = String(error).toLowerCase()
+
+  if (errorStr.includes("timeout") || errorStr.includes("timed out")) {
+    return {
+      type: "timeout",
+      message: "Connection timed out",
+      suggestion: "The target may be slow to respond or firewalled. Try increasing timeout or check network connectivity.",
+    }
+  }
+
+  if (errorStr.includes("refused") || errorStr.includes("econnrefused")) {
+    return {
+      type: "refused",
+      message: "Connection refused",
+      suggestion: "The service may not be running on the target port. Verify the port is open and the service is active.",
+    }
+  }
+
+  if (errorStr.includes("network") || errorStr.includes("unreachable") || errorStr.includes("no route")) {
+    return {
+      type: "network",
+      message: "Network error",
+      suggestion: "Check network connectivity and ensure the target is reachable. Verify VPN connection if targeting internal hosts.",
+    }
+  }
+
+  return {
+    type: "unknown",
+    message: "Connection failed",
+    suggestion: "Check the error details and verify target accessibility.",
+  }
+}
+
 export namespace ContainerManager {
   interface ManagedContainer {
     id: string
@@ -270,6 +331,7 @@ export namespace ContainerManager {
 
   /**
    * Call a tool on a container, spawning it if necessary
+   * Includes retry logic with exponential backoff for transient failures
    */
   export async function callTool(
     toolName: string,
@@ -278,20 +340,73 @@ export namespace ContainerManager {
     args: Record<string, unknown>,
     options?: ContainerOptions
   ): Promise<unknown> {
-    const client = await getClient(toolName, image, options)
+    let lastError: unknown
 
-    // Update last used time
-    const container = containers.get(toolName)
-    if (container) {
-      container.lastUsed = Date.now()
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const client = await getClient(toolName, image, options)
+
+        // Update last used time
+        const container = containers.get(toolName)
+        if (container) {
+          container.lastUsed = Date.now()
+        }
+
+        // Call the tool
+        const result = await client.callTool({
+          name: method,
+          arguments: args,
+        })
+
+        return result
+      } catch (error) {
+        lastError = error
+        const errorStr = String(error).toLowerCase()
+
+        // Check if error is retryable
+        const isRetryable =
+          errorStr.includes("timeout") ||
+          errorStr.includes("timed out") ||
+          errorStr.includes("connection reset") ||
+          errorStr.includes("network") ||
+          errorStr.includes("unreachable")
+
+        if (!isRetryable || attempt === MAX_RETRIES) {
+          // Not retryable or last attempt - throw with enhanced error
+          const classified = classifyConnectionError(error)
+          log.error("tool call failed", {
+            toolName,
+            method,
+            attempt,
+            errorType: classified.type,
+            error: String(error),
+          })
+
+          const enhancedError = new Error(
+            `${classified.message}: ${String(error)}\n\nSuggestion: ${classified.suggestion}`
+          )
+          throw enhancedError
+        }
+
+        // Calculate delay and retry
+        const delay = calculateRetryDelay(attempt)
+        log.warn("tool call failed, retrying", {
+          toolName,
+          method,
+          attempt,
+          maxRetries: MAX_RETRIES,
+          delayMs: delay,
+          error: String(error),
+        })
+
+        // Stop the container before retry (force fresh connection)
+        await stopContainer(toolName)
+
+        await sleep(delay)
+      }
     }
 
-    // Call the tool
-    const result = await client.callTool({
-      name: method,
-      arguments: args,
-    })
-
-    return result
+    // Should not reach here, but just in case
+    throw lastError
   }
 }

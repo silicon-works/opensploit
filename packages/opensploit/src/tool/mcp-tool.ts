@@ -31,7 +31,12 @@ interface RegistryTool {
     setup_url?: string
     setup_instructions?: string
   }
-  methods?: Record<string, { description: string; params?: Record<string, unknown> }>
+  methods?: Record<string, {
+    description: string
+    when_to_use?: string
+    next_step?: string
+    params?: Record<string, unknown>
+  }>
   requirements?: {
     network?: boolean
     privileged?: boolean
@@ -208,9 +213,22 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
 
     // Check if method exists
     if (toolDef.methods && !toolDef.methods[method]) {
-      const availableMethods = Object.keys(toolDef.methods).join(", ")
+      let output = `Method "${method}" not found on tool "${toolName}".\n\n`
+      output += `## Available Methods for ${toolName}\n\n`
+
+      for (const [methodName, methodDef] of Object.entries(toolDef.methods)) {
+        output += `### ${methodName}\n`
+        output += `${methodDef.description}\n`
+        if (methodDef.when_to_use) {
+          output += `*When to use:* ${methodDef.when_to_use}\n`
+        }
+        output += "\n"
+      }
+
+      output += `\nUse one of the methods listed above with mcp_tool.`
+
       return {
-        output: `Method "${method}" not found on tool "${toolName}".\n\nAvailable methods: ${availableMethods}`,
+        output,
         title: `Error: Method not found`,
         metadata: { tool: toolName, method, success: false, error: "Method not found" },
       }

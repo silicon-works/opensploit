@@ -75,6 +75,7 @@ const SkillSchema = z.object({
 const RawMethodSchema = z.object({
   description: z.string(),
   when_to_use: z.string().optional(),
+  next_step: z.string().optional(), // Workflow guidance for what to do after this method
   params: z.record(z.string(), z.any()).optional(),
   returns: z.record(z.string(), z.any()).optional(),
 })
@@ -129,6 +130,7 @@ interface ToolMethod {
   name: string
   description: string
   when_to_use?: string
+  next_step?: string
   params?: Record<string, any>
   returns?: Record<string, any>
 }
@@ -273,6 +275,7 @@ function transformRegistry(raw: z.infer<typeof RawRegistry>): Registry {
           name: methodName,
           description: methodDef.description,
           when_to_use: methodDef.when_to_use,
+          next_step: methodDef.next_step,
           params: methodDef.params,
           returns: methodDef.returns,
         })
