@@ -80,6 +80,11 @@ export namespace AntiPattern {
       suggestion: "Use the hosts tool for /etc/hosts, avoid modifying other system files",
     },
     {
+      pattern: /sudo\s+tee\s+(-a\s+)?\/etc\/hosts/,
+      message: "Modifying /etc/hosts via sudo tee",
+      suggestion: "Use the hosts tool instead: hosts({ action: 'add', entries: [{ ip: '...', hostname: '...' }] })",
+    },
+    {
       pattern: /rm\s+-rf?\s+\//,
       message: "Dangerous recursive deletion command detected",
       suggestion: "Never run recursive delete on root paths",
