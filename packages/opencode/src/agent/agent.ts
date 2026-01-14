@@ -11,6 +11,14 @@ import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
+import PROMPT_PENTEST_BASE from "./prompt/pentest-base.txt"
+import PROMPT_PENTEST from "./prompt/pentest.txt"
+import PROMPT_PENTEST_RECON from "./prompt/pentest/recon.txt"
+import PROMPT_PENTEST_ENUM from "./prompt/pentest/enum.txt"
+import PROMPT_PENTEST_EXPLOIT from "./prompt/pentest/exploit.txt"
+import PROMPT_PENTEST_POST from "./prompt/pentest/post.txt"
+import PROMPT_PENTEST_REPORT from "./prompt/pentest/report.txt"
+import PROMPT_PENTEST_RESEARCH from "./prompt/pentest/research.txt"
 import { PermissionNext } from "@/permission/next"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 
@@ -185,6 +193,232 @@ export namespace Agent {
           user,
         ),
         prompt: PROMPT_SUMMARY,
+      },
+      // =======================================================================
+      // Pentest Agents (OpenSploit)
+      // =======================================================================
+      pentest: {
+        name: "pentest",
+        mode: "primary",
+        native: true,
+        color: "#e74c3c",
+        description: "Master penetration testing agent that orchestrates security assessments",
+        prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST,
+        temperature: 0.3,
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "allow",
+            doom_loop: "ask",
+            external_directory: { "*": "ask" },
+            question: "allow",
+            plan_enter: "allow",
+            // DENY security tools in bash - forces MCP usage (REQ-ARC-011-A)
+            bash: {
+              "*": "allow",
+              "nmap*": "deny",
+              "ssh *": "deny",
+              "scp *": "deny",
+              "sqlmap*": "deny",
+              "hydra*": "deny",
+              "nikto*": "deny",
+              "gobuster*": "deny",
+              "ffuf*": "deny",
+              "curl *": "deny",
+              "wget *": "deny",
+              "nc *": "deny",
+              "netcat*": "deny",
+              "metasploit*": "deny",
+              "msfconsole*": "deny",
+              "john*": "deny",
+              "hashcat*": "deny",
+            },
+          }),
+          user,
+        ),
+        options: {},
+      },
+      "pentest/recon": {
+        name: "pentest/recon",
+        mode: "subagent",
+        native: true,
+        color: "#3498db",
+        description: "Reconnaissance phase - discover services and gather information",
+        prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_RECON,
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "deny",
+            read: "allow",
+            glob: "allow",
+            grep: "allow",
+            task: "allow",
+            tool_registry_search: "allow",
+            todowrite: "allow",
+            todoread: "allow",
+            bash: {
+              "*": "deny",
+              "cat *": "allow",
+              "ls *": "allow",
+              "head *": "allow",
+              "tail *": "allow",
+            },
+          }),
+          user,
+        ),
+        options: {},
+      },
+      "pentest/enum": {
+        name: "pentest/enum",
+        mode: "subagent",
+        native: true,
+        color: "#9b59b6",
+        description: "Enumeration phase - detailed service analysis and vulnerability identification",
+        prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_ENUM,
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "deny",
+            read: "allow",
+            glob: "allow",
+            grep: "allow",
+            task: "allow",
+            tool_registry_search: "allow",
+            todowrite: "allow",
+            todoread: "allow",
+            bash: {
+              "*": "deny",
+              "cat *": "allow",
+              "ls *": "allow",
+              "head *": "allow",
+              "tail *": "allow",
+            },
+          }),
+          user,
+        ),
+        options: {},
+      },
+      "pentest/exploit": {
+        name: "pentest/exploit",
+        mode: "subagent",
+        native: true,
+        color: "#e74c3c",
+        description: "Exploitation phase - attempt to gain access using discovered vulnerabilities",
+        prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_EXPLOIT,
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "allow",
+            doom_loop: "ask",
+            external_directory: { "*": "ask" },
+            // DENY security tools in bash - forces MCP usage
+            bash: {
+              "*": "allow",
+              "nmap*": "deny",
+              "ssh *": "deny",
+              "scp *": "deny",
+              "sqlmap*": "deny",
+              "hydra*": "deny",
+              "nikto*": "deny",
+              "gobuster*": "deny",
+              "ffuf*": "deny",
+              "curl *": "deny",
+              "wget *": "deny",
+              "nc *": "deny",
+              "netcat*": "deny",
+              "metasploit*": "deny",
+              "msfconsole*": "deny",
+              "john*": "deny",
+              "hashcat*": "deny",
+            },
+          }),
+          user,
+        ),
+        options: {},
+      },
+      "pentest/post": {
+        name: "pentest/post",
+        mode: "subagent",
+        native: true,
+        color: "#f39c12",
+        description: "Post-exploitation phase - privilege escalation, lateral movement, persistence",
+        prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_POST,
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "allow",
+            doom_loop: "ask",
+            external_directory: { "*": "ask" },
+            // DENY security tools in bash - forces MCP usage
+            bash: {
+              "*": "allow",
+              "nmap*": "deny",
+              "ssh *": "deny",
+              "scp *": "deny",
+              "sqlmap*": "deny",
+              "hydra*": "deny",
+              "nikto*": "deny",
+              "gobuster*": "deny",
+              "ffuf*": "deny",
+              "curl *": "deny",
+              "wget *": "deny",
+              "nc *": "deny",
+              "netcat*": "deny",
+              "metasploit*": "deny",
+              "msfconsole*": "deny",
+              "john*": "deny",
+              "hashcat*": "deny",
+            },
+          }),
+          user,
+        ),
+        options: {},
+      },
+      "pentest/report": {
+        name: "pentest/report",
+        mode: "subagent",
+        native: true,
+        color: "#27ae60",
+        description: "Reporting phase - aggregate findings and generate comprehensive reports",
+        prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_REPORT,
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "deny",
+            read: "allow",
+            write: "allow",
+            edit: "allow",
+            glob: "allow",
+            grep: "allow",
+            tool_registry_search: "allow",
+            read_tool_output: "allow",
+          }),
+          user,
+        ),
+        options: {},
+      },
+      "pentest/research": {
+        name: "pentest/research",
+        mode: "subagent",
+        native: true,
+        color: "#1abc9c",
+        description: "OSINT and research specialist - CVE details, exploit research, default credentials",
+        prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_RESEARCH,
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "deny",
+            read: "allow",
+            glob: "allow",
+            grep: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            task: "allow",
+            tool_registry_search: "allow",
+          }),
+          user,
+        ),
+        options: {},
       },
     }
 

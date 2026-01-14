@@ -512,3 +512,176 @@ test("explicit Truncate.DIR deny is respected", async () => {
     },
   })
 })
+
+// =============================================================================
+// Pentest Agents (OpenSploit)
+// =============================================================================
+
+test("pentest agents are included in default list", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const agents = await Agent.list()
+      const names = agents.map((a) => a.name)
+      expect(names).toContain("pentest")
+      expect(names).toContain("pentest/recon")
+      expect(names).toContain("pentest/enum")
+      expect(names).toContain("pentest/exploit")
+      expect(names).toContain("pentest/post")
+      expect(names).toContain("pentest/report")
+      expect(names).toContain("pentest/research")
+    },
+  })
+})
+
+test("pentest master agent has correct properties", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const pentest = await Agent.get("pentest")
+      expect(pentest).toBeDefined()
+      expect(pentest?.mode).toBe("primary")
+      expect(pentest?.native).toBe(true)
+      expect(pentest?.color).toBe("#e74c3c")
+      expect(pentest?.temperature).toBe(0.3)
+      expect(pentest?.prompt).toBeDefined()
+      expect(pentest?.prompt?.length).toBeGreaterThan(1000) // Base + main prompt
+    },
+  })
+})
+
+test("pentest master agent denies security tools in bash", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const pentest = await Agent.get("pentest")
+      expect(pentest).toBeDefined()
+      // Bash is allowed for general commands
+      expect(evalPerm(pentest, "bash")).toBe("allow")
+      // But security tools are denied
+      expect(PermissionNext.evaluate("bash", "nmap -sV 10.10.10.1", pentest!.permission).action).toBe("deny")
+      expect(PermissionNext.evaluate("bash", "ssh user@10.10.10.1", pentest!.permission).action).toBe("deny")
+      expect(PermissionNext.evaluate("bash", "sqlmap -u http://test", pentest!.permission).action).toBe("deny")
+      expect(PermissionNext.evaluate("bash", "curl http://test", pentest!.permission).action).toBe("deny")
+      expect(PermissionNext.evaluate("bash", "nc -lvp 4444", pentest!.permission).action).toBe("deny")
+      expect(PermissionNext.evaluate("bash", "hydra -l admin", pentest!.permission).action).toBe("deny")
+    },
+  })
+})
+
+test("pentest/recon subagent has read-only permissions", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const recon = await Agent.get("pentest/recon")
+      expect(recon).toBeDefined()
+      expect(recon?.mode).toBe("subagent")
+      expect(recon?.color).toBe("#3498db")
+      // Read-only permissions
+      expect(evalPerm(recon, "read")).toBe("allow")
+      expect(evalPerm(recon, "glob")).toBe("allow")
+      expect(evalPerm(recon, "grep")).toBe("allow")
+      expect(evalPerm(recon, "task")).toBe("allow")
+      expect(evalPerm(recon, "tool_registry_search")).toBe("allow")
+      // Write operations denied
+      expect(evalPerm(recon, "edit")).toBe("deny")
+      expect(evalPerm(recon, "write")).toBe("deny")
+    },
+  })
+})
+
+test("pentest/exploit subagent has full permissions with bash denials", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const exploit = await Agent.get("pentest/exploit")
+      expect(exploit).toBeDefined()
+      expect(exploit?.mode).toBe("subagent")
+      expect(exploit?.color).toBe("#e74c3c")
+      // Full permissions for exploit agent
+      expect(evalPerm(exploit, "edit")).toBe("allow")
+      expect(evalPerm(exploit, "write")).toBe("allow")
+      // But security tools in bash are denied
+      expect(PermissionNext.evaluate("bash", "nmap -sV 10.10.10.1", exploit!.permission).action).toBe("deny")
+      expect(PermissionNext.evaluate("bash", "msfconsole", exploit!.permission).action).toBe("deny")
+    },
+  })
+})
+
+test("pentest/report subagent has write but no bash", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const report = await Agent.get("pentest/report")
+      expect(report).toBeDefined()
+      expect(report?.mode).toBe("subagent")
+      expect(report?.color).toBe("#27ae60")
+      // Report agent can write
+      expect(evalPerm(report, "read")).toBe("allow")
+      expect(evalPerm(report, "write")).toBe("allow")
+      expect(evalPerm(report, "edit")).toBe("allow")
+      // Has tool_registry_search and read_tool_output (REQ-ARC-008)
+      expect(evalPerm(report, "tool_registry_search")).toBe("allow")
+      expect(evalPerm(report, "read_tool_output")).toBe("allow")
+      // No bash
+      expect(evalPerm(report, "bash")).toBe("deny")
+    },
+  })
+})
+
+test("pentest/research subagent has web access but no write", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const research = await Agent.get("pentest/research")
+      expect(research).toBeDefined()
+      expect(research?.mode).toBe("subagent")
+      expect(research?.color).toBe("#1abc9c")
+      // Research agent has web access
+      expect(evalPerm(research, "webfetch")).toBe("allow")
+      expect(evalPerm(research, "websearch")).toBe("allow")
+      expect(evalPerm(research, "tool_registry_search")).toBe("allow")
+      // Read-only
+      expect(evalPerm(research, "read")).toBe("allow")
+      expect(evalPerm(research, "edit")).toBe("deny")
+      expect(evalPerm(research, "write")).toBe("deny")
+      expect(evalPerm(research, "bash")).toBe("deny")
+    },
+  })
+})
+
+test("all pentest agents inherit TVAR base scaffold", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const pentestAgents = [
+        "pentest",
+        "pentest/recon",
+        "pentest/enum",
+        "pentest/exploit",
+        "pentest/post",
+        "pentest/report",
+        "pentest/research",
+      ]
+      for (const name of pentestAgents) {
+        const agent = await Agent.get(name)
+        expect(agent).toBeDefined()
+        expect(agent?.prompt).toBeDefined()
+        // All pentest agents should have TVAR pattern in their prompts
+        expect(agent?.prompt).toContain("TVAR")
+        expect(agent?.prompt).toContain("<thought>")
+        expect(agent?.prompt).toContain("<verify>")
+        expect(agent?.prompt).toContain("<action>")
+        expect(agent?.prompt).toContain("<result>")
+      }
+    },
+  })
+})

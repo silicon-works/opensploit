@@ -912,6 +912,14 @@ export namespace Config {
           title: Agent.optional(),
           summary: Agent.optional(),
           compaction: Agent.optional(),
+          // pentest (OpenSploit)
+          pentest: Agent.optional(),
+          "pentest/recon": Agent.optional(),
+          "pentest/enum": Agent.optional(),
+          "pentest/exploit": Agent.optional(),
+          "pentest/post": Agent.optional(),
+          "pentest/report": Agent.optional(),
+          "pentest/research": Agent.optional(),
         })
         .catchall(Agent)
         .optional()
