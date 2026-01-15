@@ -22,7 +22,7 @@ import { Plugin } from "../plugin"
 import { WebSearchTool } from "./websearch"
 import { CodeSearchTool } from "./codesearch"
 import { ToolRegistrySearchTool } from "./tool-registry-search"
-import { TargetTrackerTool } from "./target-tracker"
+import { UpdateEngagementStateTool, ReadEngagementStateTool } from "./engagement-state"
 import { ReadToolOutputTool } from "./read-tool-output"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
@@ -111,7 +111,8 @@ export namespace ToolRegistry {
       WebSearchTool,
       CodeSearchTool,
       ToolRegistrySearchTool,
-      TargetTrackerTool,
+      UpdateEngagementStateTool,
+      ReadEngagementStateTool,
       ReadToolOutputTool,
       SkillTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),

@@ -11,6 +11,23 @@ import { iife } from "@/util/iife"
 import { defer } from "@/util/defer"
 import { Config } from "../config/config"
 import { PermissionNext } from "@/permission/next"
+import { getEngagementStateForInjection } from "./engagement-state"
+
+// -----------------------------------------------------------------------------
+// Helper: Get Root Session ID
+// -----------------------------------------------------------------------------
+// Walks up the parent chain to find the root session for state sharing.
+
+async function getRootSessionID(sessionID: string): Promise<string> {
+  let currentID = sessionID
+  while (true) {
+    const session = await Session.get(currentID)
+    if (!session.parentID) {
+      return currentID
+    }
+    currentID = session.parentID
+  }
+}
 
 const parameters = z.object({
   description: z.string().describe("A short (3-5 words) description of the task"),
@@ -140,7 +157,24 @@ export const TaskTool = Tool.define("task", async (ctx) => {
       }
       ctx.abort.addEventListener("abort", cancel)
       using _ = defer(() => ctx.abort.removeEventListener("abort", cancel))
-      const promptParts = await SessionPrompt.resolvePromptParts(params.prompt)
+
+      // -------------------------------------------------------------------------
+      // Engagement State Injection for Pentest Subagents
+      // -------------------------------------------------------------------------
+      // When spawning pentest subagents (pentest/recon, pentest/enum, etc.),
+      // inject current engagement state so they know what was already discovered
+      // and what approaches have failed.
+
+      let enrichedPrompt = params.prompt
+      if (params.subagent_type.startsWith("pentest/")) {
+        const rootSessionID = await getRootSessionID(ctx.sessionID)
+        const engagementState = await getEngagementStateForInjection(rootSessionID)
+        if (engagementState) {
+          enrichedPrompt = engagementState + "\n\n---\n\n" + params.prompt
+        }
+      }
+
+      const promptParts = await SessionPrompt.resolvePromptParts(enrichedPrompt)
 
       const result = await SessionPrompt.prompt({
         messageID,
