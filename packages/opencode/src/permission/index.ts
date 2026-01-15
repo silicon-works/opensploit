@@ -6,6 +6,7 @@ import { Identifier } from "../id/id"
 import { Plugin } from "../plugin"
 import { Instance } from "../project/instance"
 import { Wildcard } from "../util/wildcard"
+import { getRootSession } from "../session/hierarchy"
 
 export namespace Permission {
   const log = Log.create({ service: "permission" })
@@ -68,9 +69,15 @@ export namespace Permission {
         }
       } = {}
 
+      // Ultrasploit mode - auto-approve all permissions for a session tree
+      const ultrasploit: {
+        [sessionID: string]: boolean
+      } = {}
+
       return {
         pending,
         approved,
+        ultrasploit,
       }
     },
     async (state) => {
@@ -97,6 +104,33 @@ export namespace Permission {
     return result.sort((a, b) => a.id.localeCompare(b.id))
   }
 
+  /**
+   * Enable ultrasploit mode for a session tree.
+   * Auto-approves all permissions for the root session and all children.
+   */
+  export function enableUltrasploit(sessionID: string): void {
+    const rootSessionID = getRootSession(sessionID)
+    state().ultrasploit[rootSessionID] = true
+    log.info("ultrasploit enabled", { sessionID: sessionID.slice(-8), rootSessionID: rootSessionID.slice(-8) })
+  }
+
+  /**
+   * Disable ultrasploit mode for a session tree.
+   */
+  export function disableUltrasploit(sessionID: string): void {
+    const rootSessionID = getRootSession(sessionID)
+    delete state().ultrasploit[rootSessionID]
+    log.info("ultrasploit disabled", { sessionID: sessionID.slice(-8), rootSessionID: rootSessionID.slice(-8) })
+  }
+
+  /**
+   * Check if ultrasploit mode is enabled for a session.
+   */
+  export function isUltrasploit(sessionID: string): boolean {
+    const rootSessionID = getRootSession(sessionID)
+    return state().ultrasploit[rootSessionID] === true
+  }
+
   export async function ask(input: {
     type: Info["type"]
     message: Info["message"]
@@ -106,21 +140,35 @@ export namespace Permission {
     messageID: Info["messageID"]
     metadata: Info["metadata"]
   }) {
-    const { pending, approved } = state()
+    const { pending, approved, ultrasploit } = state()
+
+    // Route permission to ROOT session for bubbling
+    const rootSessionID = getRootSession(input.sessionID)
+
     log.info("asking", {
-      sessionID: input.sessionID,
+      sessionID: input.sessionID.slice(-8),
+      rootSessionID: rootSessionID.slice(-8),
       messageID: input.messageID,
       toolCallID: input.callID,
       pattern: input.pattern,
     })
-    const approvedForSession = approved[input.sessionID] || {}
+
+    // Ultrasploit mode - auto-approve all permissions
+    if (ultrasploit[rootSessionID]) {
+      log.info("ultrasploit auto-approved", { type: input.type, message: input.message, rootSessionID: rootSessionID.slice(-8) })
+      return
+    }
+
+    // Check approvals against root session
+    const approvedForSession = approved[rootSessionID] || {}
     const keys = toKeys(input.pattern, input.type)
     if (covered(keys, approvedForSession)) return
+
     const info: Info = {
       id: Identifier.ascending("permission"),
       type: input.type,
       pattern: input.pattern,
-      sessionID: input.sessionID,
+      sessionID: rootSessionID, // Store under ROOT session for bubbling
       messageID: input.messageID,
       callID: input.callID,
       message: input.message,
@@ -141,9 +189,9 @@ export namespace Permission {
         return
     }
 
-    pending[input.sessionID] = pending[input.sessionID] || {}
+    pending[rootSessionID] = pending[rootSessionID] || {}
     return new Promise<void>((resolve, reject) => {
-      pending[input.sessionID][info.id] = {
+      pending[rootSessionID][info.id] = {
         info,
         resolve,
         reject,

@@ -1,0 +1,130 @@
+/**
+ * Session Working Directory
+ *
+ * Manages session-scoped temporary directories for engagement documents,
+ * findings, and artifacts. Uses OS temp location for automatic cleanup.
+ *
+ * Requirements:
+ * - REQ-AGT-016: Session temp directory at /tmp/opensploit-session-{rootSessionID}/
+ * - REQ-AGT-017: Cleanup when root session is deleted
+ * - Sub-agents share the root session's temp directory
+ *
+ * Directory Structure:
+ * /tmp/opensploit-session-{id}/
+ * ├── state.yaml              # Engagement state (Feature 03)
+ * ├── findings/
+ * │   ├── recon.md            # Reconnaissance findings
+ * │   ├── enum.md             # Enumeration findings
+ * │   ├── exploit.md          # Exploitation findings
+ * │   └── post-exploit.md     # Post-exploitation findings
+ * └── artifacts/
+ *     ├── screenshots/        # Screenshot evidence
+ *     └── loot/               # Captured files, credentials
+ */
+
+import { tmpdir } from "os"
+import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from "fs"
+import { join } from "path"
+import { Log } from "../util/log"
+
+const log = Log.create({ service: "session.directory" })
+
+const SESSION_DIR_PREFIX = "opensploit-session-"
+
+/**
+ * Create a temp directory for a session with standard structure.
+ * Called on first sub-agent spawn in a pentest session tree.
+ */
+export function create(sessionID: string): string {
+  const dir = join(tmpdir(), `${SESSION_DIR_PREFIX}${sessionID}`)
+
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+
+    // Create standard subdirectories
+    mkdirSync(join(dir, "findings"), { recursive: true })
+    mkdirSync(join(dir, "artifacts"), { recursive: true })
+    mkdirSync(join(dir, "artifacts", "screenshots"), { recursive: true })
+    mkdirSync(join(dir, "artifacts", "loot"), { recursive: true })
+
+    log.info("created", { sessionID: sessionID.slice(-8), dir })
+  }
+
+  return dir
+}
+
+/**
+ * Get the session directory path (does not create).
+ */
+export function get(sessionID: string): string {
+  return join(tmpdir(), `${SESSION_DIR_PREFIX}${sessionID}`)
+}
+
+/**
+ * Check if session directory exists.
+ */
+export function exists(sessionID: string): boolean {
+  return existsSync(get(sessionID))
+}
+
+/**
+ * Cleanup session directory.
+ * Called when root session is deleted.
+ */
+export function cleanup(sessionID: string): void {
+  const dir = get(sessionID)
+  if (existsSync(dir)) {
+    rmSync(dir, { recursive: true, force: true })
+    log.info("cleanup", { sessionID: sessionID.slice(-8), dir })
+  }
+}
+
+/**
+ * Get path to a specific file in session directory.
+ */
+export function filePath(sessionID: string, ...segments: string[]): string {
+  return join(get(sessionID), ...segments)
+}
+
+/**
+ * Get findings directory path.
+ */
+export function findingsDir(sessionID: string): string {
+  return join(get(sessionID), "findings")
+}
+
+/**
+ * Get artifacts directory path.
+ */
+export function artifactsDir(sessionID: string): string {
+  return join(get(sessionID), "artifacts")
+}
+
+/**
+ * Get state file path (state.yaml).
+ */
+export function statePath(sessionID: string): string {
+  return join(get(sessionID), "state.yaml")
+}
+
+/**
+ * Write a findings file.
+ */
+export function writeFinding(sessionID: string, phase: string, content: string): void {
+  const dir = findingsDir(sessionID)
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+  const path = join(dir, `${phase}.md`)
+  writeFileSync(path, content, "utf-8")
+  log.info("wrote_finding", { sessionID: sessionID.slice(-8), phase, path })
+}
+
+/**
+ * Read a findings file.
+ */
+export function readFinding(sessionID: string, phase: string): string | null {
+  const path = join(findingsDir(sessionID), `${phase}.md`)
+  if (!existsSync(path)) return null
+  return readFileSync(path, "utf-8")
+}

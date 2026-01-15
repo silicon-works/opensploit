@@ -51,6 +51,7 @@ import { HTTPException } from "hono/http-exception"
 import { errors } from "./error"
 import { Pty } from "@/pty"
 import { PermissionNext } from "@/permission/next"
+import { Permission } from "@/permission"
 import { QuestionRoute } from "./question"
 import { Installation } from "@/installation"
 import { MDNS } from "./mdns"
@@ -1056,6 +1057,98 @@ export namespace Server {
           async (c) => {
             SessionPrompt.cancel(c.req.valid("param").sessionID)
             return c.json(true)
+          },
+        )
+
+        .get(
+          "/session/:sessionID/ultrasploit",
+          describeRoute({
+            summary: "Get ultrasploit mode status",
+            description: "Check if ultrasploit mode (auto-approve all permissions) is enabled for a session.",
+            operationId: "session.ultrasploit.get",
+            responses: {
+              200: {
+                description: "Ultrasploit mode status",
+                content: {
+                  "application/json": {
+                    schema: resolver(z.object({ enabled: z.boolean() })),
+                  },
+                },
+              },
+              ...errors(400),
+            },
+          }),
+          validator(
+            "param",
+            z.object({
+              sessionID: z.string(),
+            }),
+          ),
+          async (c) => {
+            const { sessionID } = c.req.valid("param")
+            return c.json({ enabled: Permission.isUltrasploit(sessionID) })
+          },
+        )
+
+        .post(
+          "/session/:sessionID/ultrasploit",
+          describeRoute({
+            summary: "Enable ultrasploit mode",
+            description: "Enable ultrasploit mode for a session, which auto-approves all permission requests.",
+            operationId: "session.ultrasploit.enable",
+            responses: {
+              200: {
+                description: "Ultrasploit mode enabled",
+                content: {
+                  "application/json": {
+                    schema: resolver(z.object({ enabled: z.boolean() })),
+                  },
+                },
+              },
+              ...errors(400),
+            },
+          }),
+          validator(
+            "param",
+            z.object({
+              sessionID: z.string(),
+            }),
+          ),
+          async (c) => {
+            const { sessionID } = c.req.valid("param")
+            Permission.enableUltrasploit(sessionID)
+            return c.json({ enabled: true })
+          },
+        )
+
+        .delete(
+          "/session/:sessionID/ultrasploit",
+          describeRoute({
+            summary: "Disable ultrasploit mode",
+            description: "Disable ultrasploit mode for a session.",
+            operationId: "session.ultrasploit.disable",
+            responses: {
+              200: {
+                description: "Ultrasploit mode disabled",
+                content: {
+                  "application/json": {
+                    schema: resolver(z.object({ enabled: z.boolean() })),
+                  },
+                },
+              },
+              ...errors(400),
+            },
+          }),
+          validator(
+            "param",
+            z.object({
+              sessionID: z.string(),
+            }),
+          ),
+          async (c) => {
+            const { sessionID } = c.req.valid("param")
+            Permission.disableUltrasploit(sessionID)
+            return c.json({ enabled: false })
           },
         )
 

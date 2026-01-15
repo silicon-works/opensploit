@@ -475,6 +475,11 @@ export function Autocomplete(props: {
         onSelect: () => command.show(),
       },
       {
+        display: "/ultrasploit",
+        description: "toggle ultrasploit mode (auto-approve permissions)",
+        onSelect: () => command.trigger("session.ultrasploit.toggle"),
+      },
+      {
         display: "/exit",
         aliases: ["/quit", "/q"],
         description: "exit the app",

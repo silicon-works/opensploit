@@ -71,6 +71,10 @@ export const TuiThreadCommand = cmd({
       .option("agent", {
         type: "string",
         describe: "agent to use",
+      })
+      .option("ultrasploit", {
+        type: "boolean",
+        describe: "enable ultrasploit mode (auto-approve all permissions)",
       }),
   handler: async (args) => {
     // Resolve relative paths against PWD to preserve behavior when using --cwd flag
@@ -150,6 +154,7 @@ export const TuiThreadCommand = cmd({
         agent: args.agent,
         model: args.model,
         prompt,
+        ultrasploit: args.ultrasploit,
       },
       onExit: async () => {
         await client.call("shutdown", undefined)

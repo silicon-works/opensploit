@@ -68,6 +68,7 @@ import stripAnsi from "strip-ansi"
 import { Footer } from "./footer.tsx"
 import { usePromptRef } from "../../context/prompt"
 import { useExit } from "../../context/exit"
+import { useArgs } from "../../context/args"
 import { Filesystem } from "@/util/filesystem"
 import { Global } from "@/global"
 import { PermissionPrompt } from "./permission"
@@ -188,6 +189,30 @@ export function Session() {
 
   const toast = useToast()
   const sdk = useSDK()
+  const args = useArgs()
+
+  // Ultrasploit mode state - tracked locally, synced with server when possible
+  const [ultrasploitEnabled, setUltrasploitEnabled] = createSignal(args.ultrasploit ?? false)
+
+  // If --ultrasploit flag was passed, show notification on first session
+  createEffect(
+    on(
+      () => route.sessionID,
+      (sessionID) => {
+        if (args.ultrasploit && sessionID) {
+          // The server will be notified via the toggle command handler
+          // For now, just show the notification - the keyword detection or /ultrasploit command
+          // will actually enable the mode on the server side
+          toast.show({
+            message: "Ultrasploit mode active (--ultrasploit flag). Type 'ultrasploit' or use /ultrasploit to confirm.",
+            variant: "warning",
+            duration: 5000,
+          })
+        }
+      },
+      { defer: true },
+    ),
+  )
 
   // Handle initial prompt from fork
   createEffect(() => {
@@ -832,6 +857,41 @@ export function Session() {
         dialog.clear()
       },
     },
+    {
+      title: ultrasploitEnabled() ? "Disable ultrasploit mode" : "Enable ultrasploit mode",
+      value: "session.ultrasploit.toggle",
+      category: "Session",
+      onSelect: async (dialog) => {
+        const newState = !ultrasploitEnabled()
+        const method = newState ? "POST" : "DELETE"
+
+        // Try to sync with server (silently fail if RPC mode)
+        try {
+          const response = await fetch(`${sdk.url}/session/${route.sessionID}/ultrasploit`, {
+            method,
+          })
+          if (response.ok) {
+            const data = await response.json()
+            setUltrasploitEnabled(data.enabled)
+          } else {
+            // Fallback: update local state, server will sync via keyword detection
+            setUltrasploitEnabled(newState)
+          }
+        } catch {
+          // RPC mode - update local state, server will sync via keyword detection
+          setUltrasploitEnabled(newState)
+        }
+
+        toast.show({
+          message: newState
+            ? "Ultrasploit mode enabled - permissions auto-approved"
+            : "Ultrasploit mode disabled",
+          variant: newState ? "warning" : "info",
+          duration: 3000,
+        })
+        dialog.clear()
+      },
+    },
   ])
 
   const revertInfo = createMemo(() => session()?.revert)
@@ -1084,6 +1144,72 @@ const MIME_BADGE: Record<string, string> = {
   "application/x-directory": "dir",
 }
 
+// Rainbow colors for "ultrasploit" (11 letters) - softer, more pleasing shades
+const ULTRASPLOIT_RAINBOW = [
+  "#ff6b6b", // u - coral red
+  "#ffa94d", // l - orange
+  "#ffd43b", // t - gold
+  "#a9e34b", // r - lime green
+  "#69db7c", // a - mint
+  "#38d9a9", // s - teal
+  "#4dabf7", // p - cyan
+  "#748ffc", // l - blue
+  "#9775fa", // o - purple
+  "#da77f2", // i - violet
+  "#f783ac", // t - pink
+]
+
+/**
+ * Renders text with "ultrasploit" highlighted in rainbow colors
+ */
+function UltrasploitText(props: { text: string; fg: RGBA }) {
+  const parts = createMemo(() => {
+    const regex = /\b(ultrasploit)\b/gi
+    const result: Array<{ text: string; highlight: boolean }> = []
+    let lastIndex = 0
+    let match
+
+    const text = props.text
+    regex.lastIndex = 0
+
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        result.push({ text: text.slice(lastIndex, match.index), highlight: false })
+      }
+      result.push({ text: match[0], highlight: true })
+      lastIndex = regex.lastIndex
+    }
+
+    if (lastIndex < text.length) {
+      result.push({ text: text.slice(lastIndex), highlight: false })
+    }
+
+    return result.length > 0 ? result : [{ text, highlight: false }]
+  })
+
+  return (
+    <text fg={props.fg}>
+      <For each={parts()}>
+        {(part) =>
+          part.highlight ? (
+            <>
+              <For each={part.text.split("")}>
+                {(char, i) => (
+                  <span style={{ fg: RGBA.fromHex(ULTRASPLOIT_RAINBOW[i() % ULTRASPLOIT_RAINBOW.length]), bold: true }}>
+                    {char}
+                  </span>
+                )}
+              </For>
+            </>
+          ) : (
+            <span>{part.text}</span>
+          )
+        }
+      </For>
+    </text>
+  )
+}
+
 function UserMessage(props: {
   message: UserMessage
   parts: Part[]
@@ -1099,7 +1225,11 @@ function UserMessage(props: {
   const { theme } = useTheme()
   const [hover, setHover] = createSignal(false)
   const queued = createMemo(() => props.pending && props.message.id > props.pending)
-  const color = createMemo(() => (queued() ? theme.accent : local.agent.color(props.message.agent)))
+  const hasUltrasploit = createMemo(() => /\bultrasploit\b/i.test(text()?.text ?? ""))
+  const color = createMemo(() => {
+    if (hasUltrasploit()) return RGBA.fromHex("#ff00ff") // Magenta for ultrasploit
+    return queued() ? theme.accent : local.agent.color(props.message.agent)
+  })
   const metadataVisible = createMemo(() => queued() || ctx.showTimestamps())
 
   const compaction = createMemo(() => props.parts.find((x) => x.type === "compaction"))
@@ -1128,7 +1258,7 @@ function UserMessage(props: {
             backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
             flexShrink={0}
           >
-            <text fg={theme.text}>{text()?.text}</text>
+            <UltrasploitText text={text()?.text ?? ""} fg={theme.text} />
             <Show when={files().length}>
               <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
                 <For each={files()}>

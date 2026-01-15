@@ -90,6 +90,12 @@ export function Prompt(props: PromptProps) {
   const agentStyleId = syntax().getStyleId("extmark.agent")!
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
   let promptPartTypeId = 0
+  let ultrasploitTypeId = 0
+
+  // Rainbow colors for "ultrasploit" (11 letters) - memoized to handle theme changes
+  const ultrasploitStyleIds = createMemo(() =>
+    Array.from({ length: 11 }, (_, i) => syntax().getStyleId(`extmark.ultrasploit.${i}`))
+  )
 
   sdk.event.on(TuiEvent.PromptAppend.type, (evt) => {
     input.insertText(evt.properties.text)
@@ -390,6 +396,45 @@ export function Prompt(props: PromptProps) {
         })
       }
     })
+
+    // Update ultrasploit rainbow extmarks after restoring other extmarks
+    updateUltrasploitExtmarks(input.plainText)
+  }
+
+  /**
+   * Updates ultrasploit rainbow extmarks in the textarea.
+   * Detects all occurrences of "ultrasploit" (case-insensitive) and applies
+   * rainbow colors to each character.
+   */
+  function updateUltrasploitExtmarks(text: string) {
+    if (!ultrasploitTypeId) return
+
+    // Clear existing ultrasploit extmarks
+    const existing = input.extmarks.getAllForTypeId(ultrasploitTypeId)
+    for (const extmark of existing) {
+      input.extmarks.delete(extmark.id)
+    }
+
+    // Get current style IDs (reactive to theme changes)
+    const styleIds = ultrasploitStyleIds()
+    if (!styleIds.every((id) => id !== undefined)) return
+
+    // Find all occurrences of "ultrasploit" (case-insensitive)
+    const regex = /ultrasploit/gi
+    let match: RegExpExecArray | null
+    while ((match = regex.exec(text)) !== null) {
+      const startIndex = match.index
+      // Create extmarks for each character with cycling rainbow colors
+      for (let i = 0; i < match[0].length; i++) {
+        input.extmarks.create({
+          start: startIndex + i,
+          end: startIndex + i + 1,
+          virtual: false,
+          styleId: styleIds[i % styleIds.length]!,
+          typeId: ultrasploitTypeId,
+        })
+      }
+    }
   }
 
   function syncExtmarksWithPromptParts() {
@@ -770,6 +815,7 @@ export function Prompt(props: PromptProps) {
                 setStore("prompt", "input", value)
                 autocomplete.onInput(value)
                 syncExtmarksWithPromptParts()
+                updateUltrasploitExtmarks(value)
               }}
               keyBindings={textareaKeybindings()}
               onKeyDown={async (e) => {
@@ -921,6 +967,9 @@ export function Prompt(props: PromptProps) {
                 input = r
                 if (promptPartTypeId === 0) {
                   promptPartTypeId = input.extmarks.registerType("prompt-part")
+                }
+                if (ultrasploitTypeId === 0) {
+                  ultrasploitTypeId = input.extmarks.registerType("ultrasploit-rainbow")
                 }
                 props.ref?.(ref)
                 setTimeout(() => {

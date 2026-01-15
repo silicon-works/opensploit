@@ -1,109 +1,67 @@
-import { describe, expect, test } from "bun:test"
-import path from "path"
-import fs from "fs/promises"
+import { describe, expect, test, afterEach } from "bun:test"
 import yaml from "js-yaml"
-import { tmpdir } from "../fixture/fixture"
-import { Instance } from "../../src/project/instance"
-import { Session } from "../../src/session"
+import * as SessionDirectory from "../../src/session/directory"
 import {
   loadEngagementState,
   getEngagementStateForInjection,
-  getFindingsDir,
   mergeState,
 } from "../../src/tool/engagement-state"
+import { writeFileSync } from "fs"
 
 describe("tool.engagement-state", () => {
-  test("loadEngagementState returns empty object when no state file exists", async () => {
-    await using tmp = await tmpdir()
+  const testSessionID = "test-engagement-session-12345"
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const session = await Session.create({})
-        const state = await loadEngagementState(session.id)
-        expect(state).toEqual({})
-      },
-    })
+  // Clean up after each test
+  afterEach(() => {
+    SessionDirectory.cleanup(testSessionID)
+  })
+
+  test("loadEngagementState returns empty object when no state file exists", async () => {
+    // Don't create session directory - state file won't exist
+    const state = await loadEngagementState(testSessionID)
+    expect(state).toEqual({})
   })
 
   test("loadEngagementState loads state from state.yaml", async () => {
-    await using tmp = await tmpdir()
+    // Create session directory and write state
+    SessionDirectory.create(testSessionID)
+    const statePath = SessionDirectory.statePath(testSessionID)
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const session = await Session.create({})
-
-        // Write a state file
-        const stateContent = yaml.dump({
-          target: { ip: "10.10.10.1", hostname: "target.htb" },
-          ports: [{ port: 22, protocol: "tcp", service: "ssh" }],
-          accessLevel: "none",
-        })
-        await fs.writeFile(path.join(session.directory, "state.yaml"), stateContent)
-
-        const state = await loadEngagementState(session.id)
-        expect(state.target?.ip).toBe("10.10.10.1")
-        expect(state.ports?.length).toBe(1)
-        expect(state.ports?.[0].port).toBe(22)
-        expect(state.accessLevel).toBe("none")
-      },
+    const stateContent = yaml.dump({
+      target: { ip: "10.10.10.1", hostname: "target.htb" },
+      ports: [{ port: 22, protocol: "tcp", service: "ssh" }],
+      accessLevel: "none",
     })
+    writeFileSync(statePath, stateContent)
+
+    const state = await loadEngagementState(testSessionID)
+    expect(state.target?.ip).toBe("10.10.10.1")
+    expect(state.ports?.length).toBe(1)
+    expect(state.ports?.[0].port).toBe(22)
+    expect(state.accessLevel).toBe("none")
   })
 
   test("getEngagementStateForInjection returns null when no state exists", async () => {
-    await using tmp = await tmpdir()
-
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const session = await Session.create({})
-        const injection = await getEngagementStateForInjection(session.id)
-        expect(injection).toBeNull()
-      },
-    })
+    const injection = await getEngagementStateForInjection(testSessionID)
+    expect(injection).toBeNull()
   })
 
   test("getEngagementStateForInjection returns formatted state when state exists", async () => {
-    await using tmp = await tmpdir()
+    // Create session directory and write state
+    SessionDirectory.create(testSessionID)
+    const statePath = SessionDirectory.statePath(testSessionID)
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const session = await Session.create({})
-
-        // Write a state file
-        const stateContent = yaml.dump({
-          target: { ip: "10.10.10.1" },
-          ports: [{ port: 80, protocol: "tcp", service: "http" }],
-        })
-        await fs.writeFile(path.join(session.directory, "state.yaml"), stateContent)
-
-        const injection = await getEngagementStateForInjection(session.id)
-        expect(injection).not.toBeNull()
-        expect(injection).toContain("## Current Engagement State")
-        expect(injection).toContain("10.10.10.1")
-        expect(injection).toContain("port: 80")
-      },
+    const stateContent = yaml.dump({
+      target: { ip: "10.10.10.1" },
+      ports: [{ port: 80, protocol: "tcp", service: "http" }],
     })
-  })
+    writeFileSync(statePath, stateContent)
 
-  test("getFindingsDir creates findings directory", async () => {
-    await using tmp = await tmpdir()
-
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const session = await Session.create({})
-        const findingsDir = await getFindingsDir(session.id)
-
-        expect(findingsDir).toBe(path.join(session.directory, "findings"))
-
-        // Verify directory was created
-        const stat = await fs.stat(findingsDir)
-        expect(stat.isDirectory()).toBe(true)
-      },
-    })
+    const injection = await getEngagementStateForInjection(testSessionID)
+    expect(injection).not.toBeNull()
+    expect(injection).toContain("## Current Engagement State")
+    expect(injection).toContain("10.10.10.1")
+    expect(injection).toContain("port: 80")
   })
 
   // ---------------------------------------------------------------------------

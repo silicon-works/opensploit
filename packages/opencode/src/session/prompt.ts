@@ -40,6 +40,7 @@ import { SessionProcessor } from "./processor"
 import { TaskTool } from "@/tool/task"
 import { Tool } from "@/tool/tool"
 import { PermissionNext } from "@/permission/next"
+import { Permission } from "@/permission"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { iife } from "@/util/iife"
@@ -291,6 +292,34 @@ export namespace SessionPrompt {
       }
 
       if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
+
+      // Check for ultrasploit keyword in user message (only on first step)
+      // Typing "ultrasploit" in your message enables auto-approve mode for all permissions
+      // The keyword is stripped from the message so the LLM doesn't see it
+      if (step === 0) {
+        const userMsg = msgs.find((m) => m.info.id === lastUser!.id)
+        if (userMsg) {
+          const hasUltrasploit = userMsg.parts.some(
+            (p) => p.type === "text" && /\bultrasploit\b/i.test(p.text)
+          )
+          if (hasUltrasploit) {
+            // Enable ultrasploit mode if not already enabled
+            if (!Permission.isUltrasploit(sessionID)) {
+              Permission.enableUltrasploit(sessionID)
+              log.info("ultrasploit mode activated", { sessionID })
+            }
+            // Strip "ultrasploit" keyword from text parts so LLM doesn't see it
+            userMsg.parts = userMsg.parts.map((p) => {
+              if (p.type === "text") {
+                const stripped = p.text.replace(/\bultrasploit\b/gi, "").replace(/\s{2,}/g, " ").trim()
+                return { ...p, text: stripped }
+              }
+              return p
+            })
+          }
+        }
+      }
+
       if (
         lastAssistant?.finish &&
         !["tool-calls", "unknown"].includes(lastAssistant.finish) &&

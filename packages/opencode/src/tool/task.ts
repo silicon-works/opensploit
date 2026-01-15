@@ -12,6 +12,11 @@ import { defer } from "@/util/defer"
 import { Config } from "../config/config"
 import { PermissionNext } from "@/permission/next"
 import { getEngagementStateForInjection } from "./engagement-state"
+import { registerRootSession } from "../session/hierarchy"
+import * as SessionDirectory from "../session/directory"
+import { Log } from "../util/log"
+
+const log = Log.create({ service: "tool.task" })
 
 // -----------------------------------------------------------------------------
 // Helper: Get Root Session ID
@@ -27,6 +32,17 @@ async function getRootSessionID(sessionID: string): Promise<string> {
     }
     currentID = session.parentID
   }
+}
+
+// -----------------------------------------------------------------------------
+// Helper: Check if this is a pentest subagent
+// -----------------------------------------------------------------------------
+// Pentest subagents are identified by their agent type starting with "pentest/"
+// This includes pentest/recon, pentest/enum, pentest/exploit, etc.
+// The master "pentest" agent is handled separately (it's a primary agent).
+
+function isPentestSubagent(agentName: string): boolean {
+  return agentName.startsWith("pentest/")
 }
 
 const parameters = z.object({
@@ -76,6 +92,9 @@ export const TaskTool = Tool.define("task", async (ctx) => {
 
       const hasTaskPermission = agent.permission.some((rule) => rule.permission === "task")
 
+      // Find root session for hierarchy tracking and state sharing
+      const rootSessionID = await getRootSessionID(ctx.sessionID)
+
       const session = await iife(async () => {
         if (params.session_id) {
           const found = await Session.get(params.session_id).catch(() => {})
@@ -113,6 +132,15 @@ export const TaskTool = Tool.define("task", async (ctx) => {
           ],
         })
       })
+
+      // Register hierarchy for permission bubbling (Feature 04)
+      registerRootSession(session.id, rootSessionID)
+      log.info("registered hierarchy", {
+        sessionID: session.id.slice(-8),
+        rootSessionID: rootSessionID.slice(-8),
+        agent: agent.name,
+      })
+
       const msg = await MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID })
       if (msg.info.role !== "assistant") throw new Error("Not an assistant message")
 
@@ -159,19 +187,49 @@ export const TaskTool = Tool.define("task", async (ctx) => {
       using _ = defer(() => ctx.abort.removeEventListener("abort", cancel))
 
       // -------------------------------------------------------------------------
-      // Engagement State Injection for Pentest Subagents
+      // Context Injection for Pentest Session Tree (Feature 04)
       // -------------------------------------------------------------------------
-      // When spawning pentest subagents (pentest/recon, pentest/enum, etc.),
-      // inject current engagement state so they know what was already discovered
-      // and what approaches have failed.
+      // When spawning pentest/* subagents, inject:
+      // - Session working directory path
+      // - Current engagement state (target, ports, creds, vulns, failed attempts)
+      //
+      // Also inject for other agents (general, explore) if engagement state exists,
+      // allowing them to benefit from shared context when spawned in a pentest tree.
 
       let enrichedPrompt = params.prompt
-      if (params.subagent_type.startsWith("pentest/")) {
-        const rootSessionID = await getRootSessionID(ctx.sessionID)
-        const engagementState = await getEngagementStateForInjection(rootSessionID)
-        if (engagementState) {
-          enrichedPrompt = engagementState + "\n\n---\n\n" + params.prompt
+      const isPentest = isPentestSubagent(params.subagent_type)
+
+      // Check if we should inject context:
+      // 1. Always for pentest/* subagents
+      // 2. For other agents only if engagement state already exists
+      const engagementState = await getEngagementStateForInjection(rootSessionID)
+      const shouldInjectContext = isPentest || engagementState !== null
+
+      if (shouldInjectContext) {
+        // Ensure session directory exists (created on first sub-agent spawn)
+        if (!SessionDirectory.exists(rootSessionID)) {
+          SessionDirectory.create(rootSessionID)
+          log.info("created session directory", { rootSessionID: rootSessionID.slice(-8) })
         }
+        const sessionDir = SessionDirectory.get(rootSessionID)
+
+        // Build enriched prompt with context
+        enrichedPrompt = `## Session Directory
+${sessionDir}
+
+${engagementState ?? "No engagement state yet. Use \`update_engagement_state\` to record discoveries."}
+
+---
+
+## Your Task
+${params.prompt}`
+
+        log.info("context injection", {
+          rootSessionID: rootSessionID.slice(-8),
+          sessionDir,
+          hasState: !!engagementState,
+          agent: agent.name,
+        })
       }
 
       const promptParts = await SessionPrompt.resolvePromptParts(enrichedPrompt)

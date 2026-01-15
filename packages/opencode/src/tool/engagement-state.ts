@@ -3,8 +3,8 @@ import { Tool } from "./tool"
 import path from "path"
 import fs from "fs/promises"
 import yaml from "js-yaml"
-import { Session } from "../session"
 import { Log } from "../util/log"
+import * as SessionDirectory from "../session/directory"
 
 const log = Log.create({ service: "tool.engagement-state" })
 
@@ -16,10 +16,12 @@ const log = Log.create({ service: "tool.engagement-state" })
 // Key behaviors:
 // - Merges arrays (appends items)
 // - Replaces scalar values
-// - Persists to {sessionDir}/state.yaml
+// - Persists to /tmp/opensploit-session-{rootSessionID}/state.yaml
 // - Available to all agents for sharing discoveries
+//
+// Updated for Feature 04: Uses SessionDirectory for /tmp/ storage
 
-// Storage paths - directly in session directory per Feature 03 spec
+// Storage paths - directly in session directory per Feature 04 spec
 const STATE_FILE = "state.yaml"
 const FINDINGS_DIR = "findings"
 
@@ -106,22 +108,28 @@ type EngagementState = z.infer<typeof EngagementStateSchema>
 // -----------------------------------------------------------------------------
 // File System Helpers
 // -----------------------------------------------------------------------------
+// Uses /tmp/opensploit-session-{sessionID}/ for engagement data storage.
+// Session directory is created on first write if it doesn't exist.
 
-async function getSessionDir(sessionID: string): Promise<string> {
-  const session = await Session.get(sessionID)
-  return session.directory
+function getSessionDir(sessionID: string): string {
+  return SessionDirectory.get(sessionID)
 }
 
-async function getStatePath(sessionID: string): Promise<string> {
-  const sessionDir = await getSessionDir(sessionID)
-  return path.join(sessionDir, STATE_FILE)
+function getStatePath(sessionID: string): string {
+  return SessionDirectory.statePath(sessionID)
+}
+
+async function ensureSessionDir(sessionID: string): Promise<string> {
+  const dir = getSessionDir(sessionID)
+  if (!SessionDirectory.exists(sessionID)) {
+    SessionDirectory.create(sessionID)
+  }
+  return dir
 }
 
 async function ensureFindingsDir(sessionID: string): Promise<string> {
-  const sessionDir = await getSessionDir(sessionID)
-  const findingsDir = path.join(sessionDir, FINDINGS_DIR)
-  await fs.mkdir(findingsDir, { recursive: true })
-  return findingsDir
+  await ensureSessionDir(sessionID)
+  return SessionDirectory.findingsDir(sessionID)
 }
 
 // -----------------------------------------------------------------------------
@@ -130,7 +138,7 @@ async function ensureFindingsDir(sessionID: string): Promise<string> {
 
 export async function loadEngagementState(sessionID: string): Promise<EngagementState> {
   try {
-    const statePath = await getStatePath(sessionID)
+    const statePath = getStatePath(sessionID)
     const content = await fs.readFile(statePath, "utf-8")
     const parsed = yaml.load(content) as EngagementState
     return parsed ?? {}
@@ -145,7 +153,10 @@ export async function loadEngagementState(sessionID: string): Promise<Engagement
 }
 
 async function saveEngagementState(sessionID: string, state: EngagementState): Promise<void> {
-  const statePath = await getStatePath(sessionID)
+  // Ensure session directory exists before writing
+  await ensureSessionDir(sessionID)
+
+  const statePath = getStatePath(sessionID)
   const content = yaml.dump(state, {
     indent: 2,
     lineWidth: 120,
@@ -153,7 +164,7 @@ async function saveEngagementState(sessionID: string, state: EngagementState): P
     sortKeys: false,
   })
   await fs.writeFile(statePath, content, "utf-8")
-  log.info("Saved engagement state", { sessionID, path: statePath })
+  log.info("Saved engagement state", { sessionID: sessionID.slice(-8), path: statePath })
 }
 
 /**
