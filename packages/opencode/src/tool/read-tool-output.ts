@@ -1,166 +1,133 @@
+/**
+ * Read Tool Output
+ *
+ * Built-in tool for querying stored MCP tool outputs.
+ * Supports field:value queries on normalized records.
+ *
+ * Requirements (Feature 05):
+ * - REQ-ARC-026: Provide retrieval tool for stored outputs
+ * - REQ-ARC-027: Support field:value queries on records
+ */
+
 import z from "zod"
 import { Tool } from "./tool"
-import path from "path"
-import os from "os"
-import fs from "fs/promises"
 import { Log } from "../util/log"
+import * as OutputStore from "./output-store"
 
 const log = Log.create({ service: "tool.read-tool-output" })
 
-// =============================================================================
-// Stub Implementation for Feature 08 (Output Store)
-// =============================================================================
-// This is a simplified stub that reads stored tool outputs from disk.
-// Full implementation will include:
-// - Structured output indexing
-// - Search within outputs
-// - Line range selection
-// - Integration with tool output processor
+const DESCRIPTION = `Query stored tool output by reference ID.
 
-const OUTPUTS_DIR = path.join(os.homedir(), ".opensploit", "outputs")
+When tool outputs are large, they are stored externally and a summary with
+reference ID is returned. Use this tool to query the full results.
 
-const DESCRIPTION = `Retrieve stored tool output by reference ID.
+**Query Syntax:**
 
-When tool outputs are too large to fit in context, they are stored externally
-and a reference ID is returned. Use this tool to retrieve the full output
-or specific portions of it.
+1. **Field query** (exact match):
+   - \`port:22\` - find records where port equals 22
+   - \`status:200\` - find records where status equals 200
+   - \`state:open\` - find records where state equals "open"
+
+2. **Text search** (substring match):
+   - \`ssh\` - find records containing "ssh" in any field
+   - \`admin\` - find records containing "admin" in any field
 
 **Parameters:**
-- output_id: The reference ID returned when the output was stored
-- session_id: Session ID to scope the output lookup
-- start_line: Optional starting line number (1-indexed)
-- end_line: Optional ending line number
-- search: Optional search string to filter output
+- \`id\`: Reference ID from the stored output (e.g., "output_xxx")
+- \`session_id\`: Session ID to scope the lookup
+- \`query\`: Field:value query or text search
+- \`type\`: Filter by record type (e.g., "port", "directory", "vulnerability")
+- \`limit\`: Maximum records to return (default: 50)
 
-**Note:** This is a stub implementation. Full version (Feature 08) will include
-structured indexing, field-based search, and intelligent summarization.`
+**Examples:**
+\`\`\`
+read_tool_output(id="output_abc", session_id="session_xyz", query="port:22")
+read_tool_output(id="output_abc", session_id="session_xyz", query="open")
+read_tool_output(id="output_abc", session_id="session_xyz", type="vulnerability")
+\`\`\`
+`
 
 export const ReadToolOutputTool = Tool.define("read_tool_output", {
   description: DESCRIPTION,
   parameters: z.object({
-    output_id: z.string().describe("Reference ID of the stored output"),
+    id: z.string().describe("Reference ID of the stored output"),
     session_id: z.string().describe("Session ID to scope the lookup"),
-    start_line: z.number().optional().describe("Starting line number (1-indexed)"),
-    end_line: z.number().optional().describe("Ending line number"),
-    search: z.string().optional().describe("Search string to filter output lines"),
-    max_lines: z.number().optional().default(100).describe("Maximum lines to return (default: 100)"),
+    query: z.string().optional().describe("Field:value query (e.g., 'port:22') or text search"),
+    type: z.string().optional().describe("Filter by record type (e.g., 'port', 'directory')"),
+    limit: z.number().optional().default(50).describe("Maximum records to return (default: 50)"),
   }),
   async execute(params, ctx) {
-    const { output_id, session_id, start_line, end_line, search, max_lines = 100 } = params
+    const { id, session_id, query, type, limit = 50 } = params
 
-    log.info("read_tool_output", { output_id, session_id, start_line, end_line, search })
+    log.info("read_tool_output", { id, session_id, query, type, limit })
 
-    // Construct output path
-    const outputPath = path.join(OUTPUTS_DIR, session_id, `${output_id}.txt`)
+    // Query the output store
+    const result = await OutputStore.query({
+      sessionId: session_id,
+      outputId: id,
+      query,
+      type,
+      limit,
+    })
 
-    try {
-      // Check if file exists
-      await fs.access(outputPath)
+    // Common metadata base
+    const baseMeta = {
+      id,
+      session_id,
+    }
 
-      // Read file content
-      const content = await fs.readFile(outputPath, "utf-8")
-      let lines = content.split("\n")
-      const totalLines = lines.length
-
-      // Apply line range if specified
-      if (start_line !== undefined || end_line !== undefined) {
-        const start = (start_line ?? 1) - 1 // Convert to 0-indexed
-        const end = end_line ?? lines.length
-        lines = lines.slice(start, end)
-      }
-
-      // Apply search filter if specified
-      if (search) {
-        const searchLower = search.toLowerCase()
-        lines = lines.filter(line => line.toLowerCase().includes(searchLower))
-      }
-
-      // Apply max lines limit
-      const truncated = lines.length > max_lines
-      if (truncated) {
-        lines = lines.slice(0, max_lines)
-      }
-
-      // Build output
-      let output = lines.join("\n")
-
-      // Add metadata header
-      const header = [
-        `Output ID: ${output_id}`,
-        `Total lines: ${totalLines}`,
-        `Showing: ${lines.length} lines`,
-        truncated ? `(truncated to ${max_lines} lines)` : "",
-        search ? `Search filter: "${search}"` : "",
-        "---",
-      ].filter(Boolean).join("\n")
-
-      output = header + "\n" + output
-
-      return {
-        output,
-        title: `read_tool_output: ${output_id}`,
-        metadata: {
-          output_id,
-          session_id,
-          total_lines: totalLines,
-          returned_lines: lines.length,
-          truncated,
-        },
-      }
-    } catch (error) {
-      // File not found or other error
-      const errorMessage = error instanceof Error ? error.message : String(error)
-
-      if (errorMessage.includes("ENOENT")) {
+    if (!result.found) {
+      // Try to provide helpful error message
+      const storedMeta = await OutputStore.getMetadata(session_id, id)
+      if (!storedMeta.found) {
         return {
-          output: `Output not found: ${output_id}\n\nThe referenced output may have expired or the session ID may be incorrect.\n\nPath checked: ${outputPath}`,
-          title: `read_tool_output: not found`,
-          metadata: {
-            output_id,
-            session_id,
-            total_lines: 0,
-            returned_lines: 0,
-            truncated: false,
-          },
+          output: `Output not found: ${id}
+
+The referenced output may have expired (24 hour retention) or the session ID may be incorrect.
+
+**Troubleshooting:**
+- Check that the output ID matches exactly (copy from the summary)
+- Verify the session ID is correct
+- Outputs older than 24 hours are automatically cleaned up`,
+          title: "read_tool_output: not found",
+          metadata: baseMeta,
         }
       }
 
       return {
-        output: `Error reading output: ${errorMessage}`,
-        title: `read_tool_output: error`,
-        metadata: {
-          output_id,
-          session_id,
-          total_lines: 0,
-          returned_lines: 0,
-          truncated: false,
-        },
+        output: result.error ?? "Unknown error reading output",
+        title: "read_tool_output: error",
+        metadata: baseMeta,
       }
+    }
+
+    // Format results
+    const formattedOutput = OutputStore.formatQueryResults(result.records, result.total, limit)
+
+    // Build metadata
+    const storedMeta = await OutputStore.getMetadata(session_id, id)
+
+    // Build header with context
+    const header = [
+      `**Output ID**: ${id}`,
+      `**Tool**: ${storedMeta.tool ?? "unknown"}.${storedMeta.method ?? "execute"}`,
+      `**Query**: ${query ?? "(all records)"}`,
+      type ? `**Type Filter**: ${type}` : "",
+      `**Results**: ${result.records.length} of ${result.total}`,
+      "---",
+    ]
+      .filter(Boolean)
+      .join("\n")
+
+    const output = header + "\n\n" + formattedOutput
+
+    return {
+      output,
+      title: `read_tool_output: ${id}`,
+      metadata: baseMeta,
     }
   },
 })
 
-// =============================================================================
-// Helper function to store tool output (for use by other tools)
-// =============================================================================
-
-export async function storeToolOutput(
-  sessionId: string,
-  outputId: string,
-  content: string
-): Promise<string> {
-  const sessionDir = path.join(OUTPUTS_DIR, sessionId)
-  await fs.mkdir(sessionDir, { recursive: true })
-
-  const outputPath = path.join(sessionDir, `${outputId}.txt`)
-  await fs.writeFile(outputPath, content, "utf-8")
-
-  log.info("stored tool output", { sessionId, outputId, size: content.length })
-
-  return outputId
-}
-
-export async function generateOutputId(): Promise<string> {
-  // Simple ID generation - full implementation would use more robust IDs
-  return `output_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
-}
+// Re-export for backwards compatibility
+export { OutputStore }

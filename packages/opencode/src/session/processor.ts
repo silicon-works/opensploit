@@ -15,10 +15,95 @@ import { Config } from "@/config/config"
 import { SessionCompaction } from "./compaction"
 import { PermissionNext } from "@/permission/next"
 import { Question } from "@/question"
+import * as OutputStore from "@/tool/output-store"
+import { MCP } from "@/mcp"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
   const log = Log.create({ service: "session.processor" })
+
+  /**
+   * Cache of MCP tool names for efficient lookup.
+   * Populated lazily from MCP.tools() which is the source of truth.
+   */
+  let mcpToolNamesCache: Set<string> | undefined
+
+  /**
+   * Check if a tool is an MCP tool by querying the MCP registry.
+   * This is the authoritative source - MCP.tools() returns all registered MCP tools.
+   */
+  async function isMcpTool(toolName: string): Promise<boolean> {
+    if (!mcpToolNamesCache) {
+      try {
+        const tools = await MCP.tools()
+        mcpToolNamesCache = new Set(Object.keys(tools))
+      } catch {
+        // If MCP.tools() fails, fall back to empty set
+        mcpToolNamesCache = new Set()
+      }
+    }
+    return mcpToolNamesCache.has(toolName)
+  }
+
+  /**
+   * Invalidate MCP tool names cache (call when MCP config changes).
+   */
+  export function invalidateMcpToolCache(): void {
+    mcpToolNamesCache = undefined
+  }
+
+  /**
+   * Process MCP tool output through the Output Store.
+   * Parses MCP JSON format, stores large outputs, returns summary.
+   */
+  async function processMcpToolOutput(
+    toolName: string,
+    output: string,
+    sessionID: string,
+  ): Promise<{ output: string; stored: boolean; outputId?: string }> {
+    try {
+      // MCP tools return JSON with data fields and raw_output
+      const parsed = JSON.parse(output)
+
+      // If no raw_output field, this isn't MCP format
+      if (!("raw_output" in parsed)) {
+        return { output, stored: false }
+      }
+
+      // Extract tool name (first part before underscore)
+      const toolBase = toolName.split("_")[0]
+      const method = toolName.split("_").slice(1).join("_")
+
+      // Extract data (everything except raw_output)
+      const { raw_output: rawOutput, ...data } = parsed
+
+      // Pass through Output Store
+      const result = await OutputStore.store({
+        sessionId: sessionID,
+        tool: toolBase,
+        method,
+        data,
+        rawOutput: rawOutput ?? "",
+      })
+
+      if (result.stored) {
+        log.info("mcp output stored", {
+          tool: toolName,
+          outputId: result.outputId,
+          sessionId: sessionID.slice(-8),
+        })
+      }
+
+      return {
+        output: result.output,
+        stored: result.stored,
+        outputId: result.outputId,
+      }
+    } catch {
+      // Not valid JSON or processing failed - return original
+      return { output, stored: false }
+    }
+  }
 
   export type Info = Awaited<ReturnType<typeof create>>
   export type Result = Awaited<ReturnType<Info["process"]>>
@@ -172,13 +257,33 @@ export namespace SessionProcessor {
                 case "tool-result": {
                   const match = toolcalls[value.toolCallId]
                   if (match && match.state.status === "running") {
+                    // Process MCP tool outputs through Output Store (Feature 05)
+                    let finalOutput = value.output.output
+                    let finalMetadata = value.output.metadata
+
+                    if (match.tool && (await isMcpTool(match.tool))) {
+                      const processed = await processMcpToolOutput(
+                        match.tool,
+                        value.output.output,
+                        input.sessionID,
+                      )
+                      finalOutput = processed.output
+                      if (processed.stored) {
+                        finalMetadata = {
+                          ...finalMetadata,
+                          outputStored: true,
+                          outputId: processed.outputId,
+                        }
+                      }
+                    }
+
                     await Session.updatePart({
                       ...match,
                       state: {
                         status: "completed",
                         input: value.input,
-                        output: value.output.output,
-                        metadata: value.output.metadata,
+                        output: finalOutput,
+                        metadata: finalMetadata,
                         title: value.output.title,
                         time: {
                           start: match.state.time.start,

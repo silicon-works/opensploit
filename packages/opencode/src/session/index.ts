@@ -21,9 +21,9 @@ import { Snapshot } from "@/snapshot"
 
 import type { Provider } from "@/provider/provider"
 import { PermissionNext } from "@/permission/next"
-import path from "path"
 import { unregisterTree } from "./hierarchy"
 import * as SessionDirectory from "./directory"
+import * as OutputStore from "@/tool/output-store"
 import { Global } from "@/global"
 
 export namespace Session {
@@ -336,10 +336,12 @@ export namespace Session {
       await unshare(sessionID).catch(() => {})
 
       // Feature 04: Clean up hierarchy tracking and temp directory
+      // Feature 05: Clean up output store files
       // Only clean up temp directory for root sessions (sessions without parentID)
       if (!session.parentID) {
         unregisterTree(sessionID)
         SessionDirectory.cleanup(sessionID)
+        OutputStore.cleanupSession(sessionID)
       }
 
       for (const msg of await Storage.list(["message", sessionID])) {
