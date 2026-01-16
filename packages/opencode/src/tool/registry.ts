@@ -24,6 +24,7 @@ import { CodeSearchTool } from "./codesearch"
 import { ToolRegistrySearchTool } from "./tool-registry-search"
 import { UpdateEngagementStateTool, ReadEngagementStateTool } from "./engagement-state"
 import { ReadToolOutputTool } from "./read-tool-output"
+import { McpToolInvoke } from "./mcp-tool"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
@@ -111,6 +112,7 @@ export namespace ToolRegistry {
       WebSearchTool,
       CodeSearchTool,
       ToolRegistrySearchTool,
+      McpToolInvoke,
       UpdateEngagementStateTool,
       ReadEngagementStateTool,
       ReadToolOutputTool,
