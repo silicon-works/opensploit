@@ -17,6 +17,7 @@ import { PermissionNext } from "@/permission/next"
 import { Question } from "@/question"
 import * as OutputStore from "@/tool/output-store"
 import { MCP } from "@/mcp"
+import { parseTVAR, extractPhase, stripTVARBlocks } from "./tvar-parser"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -226,6 +227,28 @@ export namespace SessionProcessor {
                     toolcalls[value.toolCallId] = part as MessageV2.ToolPart
 
                     const parts = await MessageV2.parts(input.assistantMessage.id)
+
+                    // Feature 09: Link preceding TVAR to this tool call
+                    // Find the most recent unlinked TVAR part and link it
+                    const unlinkedTVAR = parts.findLast(
+                      (p): p is MessageV2.TVARPart => p.type === "tvar" && !p.toolCallID,
+                    )
+                    if (unlinkedTVAR) {
+                      unlinkedTVAR.toolCallID = value.toolCallId
+                      await Session.updatePart(unlinkedTVAR)
+                      log.info("tvar_linked", {
+                        tvarId: unlinkedTVAR.id,
+                        toolCallId: value.toolCallId,
+                        tool: value.toolName,
+                      })
+                    } else {
+                      // REQ-RSN-003: Log warning for tool calls without preceding TVAR
+                      log.warn("tool_without_tvar", {
+                        tool: value.toolName,
+                        toolCallId: value.toolCallId,
+                      })
+                    }
+
                     const lastThree = parts.slice(-DOOM_LOOP_THRESHOLD)
 
                     if (
@@ -421,10 +444,46 @@ export namespace SessionProcessor {
                     )
                     currentText.text = textOutput.text
                     currentText.time = {
-                      start: Date.now(),
+                      start: currentText.time?.start ?? Date.now(),
                       end: Date.now(),
                     }
                     if (value.providerMetadata) currentText.metadata = value.providerMetadata
+
+                    // Feature 09: Parse TVAR blocks from text output
+                    const tvarBlocks = parseTVAR(currentText.text)
+                    for (const block of tvarBlocks) {
+                      const tvarPart: MessageV2.TVARPart = {
+                        id: Identifier.ascending("part"),
+                        messageID: input.assistantMessage.id,
+                        sessionID: input.assistantMessage.sessionID,
+                        type: "tvar",
+                        thought: block.thought,
+                        verify: block.verify,
+                        action: block.action,
+                        result: block.result,
+                        phase: extractPhase(block),
+                        time: {
+                          start: currentText.time?.start ?? Date.now(),
+                          end: Date.now(),
+                        },
+                      }
+                      await Session.updatePart(tvarPart)
+                      log.info("tvar_parsed", {
+                        phase: tvarPart.phase,
+                        hasAction: !!block.action,
+                        hasResult: !!block.result,
+                      })
+                    }
+
+                    // Strip TVAR blocks from text to avoid duplication in display
+                    // TVAR is now stored in TVARPart and will be rendered separately
+                    if (tvarBlocks.length > 0) {
+                      currentText.text = stripTVARBlocks(currentText.text, tvarBlocks)
+                      log.info("tvar_stripped", {
+                        blocksRemoved: tvarBlocks.length,
+                      })
+                    }
+
                     await Session.updatePart(currentText)
                   }
                   currentText = undefined

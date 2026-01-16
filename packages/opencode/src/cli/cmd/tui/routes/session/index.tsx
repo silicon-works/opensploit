@@ -28,6 +28,7 @@ import {
 } from "@opentui/core"
 import { Prompt, type PromptRef } from "@tui/component/prompt"
 import type { AssistantMessage, Part, ToolPart, UserMessage, TextPart, ReasoningPart } from "@opencode-ai/sdk/v2"
+import type { MessageV2 } from "@/session/message-v2"
 import { useLocal } from "@tui/context/local"
 import { Locale } from "@/util/locale"
 import type { Tool } from "@/tool/tool"
@@ -1393,6 +1394,7 @@ const PART_MAPPING = {
   text: TextPart,
   tool: ToolPart,
   reasoning: ReasoningPart,
+  tvar: TVARPartComponent,
 }
 
 function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: AssistantMessage }) {
@@ -1423,6 +1425,115 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
           conceal={ctx.conceal()}
           fg={theme.textMuted}
         />
+      </box>
+    </Show>
+  )
+}
+
+/**
+ * TVAR (Thought-Verify-Action-Result) reasoning component
+ * REQ-RSN-036: Render with muted/collapsed styling
+ */
+function TVARPartComponent(props: { last: boolean; part: MessageV2.TVARPart; message: AssistantMessage }) {
+  const { theme } = useTheme()
+  const ctx = use()
+  const [expanded, setExpanded] = createSignal(false)
+
+  // Phase badge colors
+  const phaseColor = createMemo(() => {
+    switch (props.part.phase) {
+      case "reconnaissance":
+        return RGBA.fromHex("#4dabf7") // blue
+      case "enumeration":
+        return RGBA.fromHex("#69db7c") // green
+      case "exploitation":
+        return RGBA.fromHex("#ff6b6b") // red
+      case "post_exploitation":
+        return RGBA.fromHex("#ffa94d") // orange
+      case "reporting":
+        return RGBA.fromHex("#9775fa") // purple
+      default:
+        return theme.textMuted
+    }
+  })
+
+  const phaseBadge = createMemo(() => {
+    if (!props.part.phase) return ""
+    const labels: Record<string, string> = {
+      reconnaissance: "RECON",
+      enumeration: "ENUM",
+      exploitation: "EXPLOIT",
+      post_exploitation: "POST",
+      reporting: "REPORT",
+    }
+    return labels[props.part.phase] ?? props.part.phase.toUpperCase()
+  })
+
+  // Truncate thought for collapsed view
+  const thoughtPreview = createMemo(() => {
+    const thought = props.part.thought
+    if (thought.length <= 80) return thought
+    return thought.slice(0, 80) + "..."
+  })
+
+  return (
+    <Show when={ctx.showThinking()}>
+      <box
+        id={"tvar-" + props.part.id}
+        paddingLeft={2}
+        marginTop={1}
+        flexDirection="column"
+        border={["left"]}
+        customBorderChars={SplitBorder.customBorderChars}
+        borderColor={theme.backgroundElement}
+        onMouseUp={() => setExpanded((prev) => !prev)}
+      >
+        {/* Header with phase badge */}
+        <text fg={theme.textMuted}>
+          <span style={{ bold: true }}>◆</span> TVAR{" "}
+          <Show when={phaseBadge()}>
+            <span style={{ fg: phaseColor(), bold: true }}>[{phaseBadge()}]</span>
+          </Show>
+        </text>
+
+        {/* Collapsed view */}
+        <Show when={!expanded()}>
+          <text fg={theme.textMuted} paddingLeft={2}>
+            {thoughtPreview()}
+          </text>
+        </Show>
+
+        {/* Expanded view */}
+        <Show when={expanded()}>
+          <box paddingLeft={2} marginTop={1} gap={1}>
+            <text fg={theme.textMuted}>
+              <span style={{ bold: true, fg: theme.text }}>Thought:</span> {props.part.thought}
+            </text>
+            <text fg={theme.textMuted}>
+              <span style={{ bold: true, fg: theme.text }}>Verify:</span> {props.part.verify}
+            </text>
+            <Show when={props.part.action}>
+              <text fg={theme.textMuted}>
+                <span style={{ bold: true, fg: theme.text }}>Action:</span> {props.part.action}
+              </text>
+            </Show>
+            <Show when={props.part.result}>
+              <text fg={theme.textMuted}>
+                <span style={{ bold: true, fg: theme.text }}>Result:</span> {props.part.result}
+              </text>
+            </Show>
+            <Show when={props.part.toolCallID}>
+              <text fg={theme.textMuted}>
+                → Tool: {props.part.toolCallID}
+              </text>
+            </Show>
+          </box>
+        </Show>
+
+        {/* Click hint */}
+        <text fg={theme.textMuted} paddingLeft={2}>
+          {expanded() ? "↑ collapse" : "↓ expand"}
+        </text>
       </box>
     </Show>
   )

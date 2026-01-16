@@ -88,6 +88,33 @@ export namespace MessageV2 {
   })
   export type ReasoningPart = z.infer<typeof ReasoningPart>
 
+  /**
+   * TVAR (Thought-Verify-Action-Result) structured reasoning for pentest agents.
+   * Parsed from XML-like tags in agent text output.
+   *
+   * Requirements (Feature 09):
+   * - REQ-RSN-034: Parse TVAR blocks into structured TVARPart
+   * - REQ-RSN-035: Strip from TextPart (stored separately)
+   */
+  export const TVARPart = PartBase.extend({
+    type: z.literal("tvar"),
+    thought: z.string(), // What am I trying to accomplish?
+    verify: z.string(), // Is this the right approach?
+    action: z.string().optional(), // Tool call description (before execution)
+    result: z.string().optional(), // What did I learn? (after execution)
+    toolCallID: z.string().optional(), // Reference to associated ToolPart
+    phase: z
+      .enum(["reconnaissance", "enumeration", "exploitation", "post_exploitation", "reporting"])
+      .optional(),
+    time: z.object({
+      start: z.number(),
+      end: z.number().optional(),
+    }),
+  }).meta({
+    ref: "TVARPart",
+  })
+  export type TVARPart = z.infer<typeof TVARPart>
+
   const FilePartSourceBase = z.object({
     text: z
       .object({
@@ -325,6 +352,7 @@ export namespace MessageV2 {
       TextPart,
       SubtaskPart,
       ReasoningPart,
+      TVARPart,
       FilePart,
       ToolPart,
       StepStartPart,

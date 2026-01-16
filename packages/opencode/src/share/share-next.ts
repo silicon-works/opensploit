@@ -97,7 +97,7 @@ export namespace ShareNext {
       }
     | {
         type: "part"
-        data: SDK.Part
+        data: MessageV2.Part // Use internal type to support TVARPart
       }
     | {
         type: "session_diff"
