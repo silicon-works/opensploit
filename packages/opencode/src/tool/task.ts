@@ -74,8 +74,10 @@ export const TaskTool = Tool.define("task", async (ctx) => {
     async execute(params: z.infer<typeof parameters>, ctx) {
       const config = await Config.get()
 
-      // Skip permission check when user explicitly invoked via @ or command subtask
-      if (!ctx.extra?.bypassAgentCheck) {
+      // Skip permission check when:
+      // 1. User explicitly invoked via @ or command subtask (bypassAgentCheck)
+      // 2. Spawning pentest subagents (pentest/* agents are part of authorized methodology)
+      if (!ctx.extra?.bypassAgentCheck && !isPentestSubagent(params.subagent_type)) {
         await ctx.ask({
           permission: "task",
           patterns: [params.subagent_type],
@@ -89,8 +91,6 @@ export const TaskTool = Tool.define("task", async (ctx) => {
 
       const agent = await Agent.get(params.subagent_type)
       if (!agent) throw new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`)
-
-      const hasTaskPermission = agent.permission.some((rule) => rule.permission === "task")
 
       // Find root session for hierarchy tracking and state sharing
       const rootSessionID = await getRootSessionID(ctx.sessionID)
@@ -115,15 +115,13 @@ export const TaskTool = Tool.define("task", async (ctx) => {
               pattern: "*",
               action: "deny",
             },
-            ...(hasTaskPermission
-              ? []
-              : [
-                  {
-                    permission: "task" as const,
-                    pattern: "*" as const,
-                    action: "deny" as const,
-                  },
-                ]),
+            // Always deny task for subagents - prevents nested subagent chains
+            // This matches backup branch behavior that prevented doom loops
+            {
+              permission: "task" as const,
+              pattern: "*" as const,
+              action: "deny" as const,
+            },
             ...(config.experimental?.primary_tools?.map((t) => ({
               pattern: "*",
               action: "allow" as const,
@@ -245,7 +243,7 @@ ${params.prompt}`
         tools: {
           todowrite: false,
           todoread: false,
-          ...(hasTaskPermission ? {} : { task: false }),
+          task: false, // Always disable task for subagents - prevents nested subagent chains
           ...Object.fromEntries((config.experimental?.primary_tools ?? []).map((t) => [t, false])),
         },
         parts: promptParts,
