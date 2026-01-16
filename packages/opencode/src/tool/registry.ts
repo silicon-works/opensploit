@@ -24,6 +24,7 @@ import { CodeSearchTool } from "./codesearch"
 import { ToolRegistrySearchTool } from "./tool-registry-search"
 import { UpdateEngagementStateTool, ReadEngagementStateTool } from "./engagement-state"
 import { ReadToolOutputTool } from "./read-tool-output"
+import { HostsTool } from "./hosts"
 import { McpToolInvoke } from "./mcp-tool"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
@@ -116,6 +117,7 @@ export namespace ToolRegistry {
       UpdateEngagementStateTool,
       ReadEngagementStateTool,
       ReadToolOutputTool,
+      HostsTool,
       SkillTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
