@@ -298,3 +298,292 @@ describe("Trajectory.anonymize", () => {
     expect(anonymized.trajectory[0].result).not.toContain("admin123")
   })
 })
+
+// =============================================================================
+// Feature 06: Engagement Log Aggregation Tests
+// =============================================================================
+
+describe("Trajectory.formatEngagementLog", () => {
+  test("should format engagement log with header and summary", () => {
+    const log: Trajectory.EngagementLog = {
+      rootSessionID: "session-abc123",
+      startTime: "2026-01-16T10:00:00.000Z",
+      endTime: "2026-01-16T10:30:00.000Z",
+      entries: [],
+      summary: {
+        totalAgents: 3,
+        agentNames: ["master", "recon", "enum"],
+        toolCalls: 10,
+        successfulTools: 8,
+        failedTools: 2,
+        phases: ["reconnaissance", "enumeration"],
+      },
+    }
+
+    const formatted = Trajectory.formatEngagementLog(log)
+
+    expect(formatted).toContain("# Engagement Log")
+    expect(formatted).toContain("Root Session: session-abc123")
+    expect(formatted).toContain("Start: 2026-01-16T10:00:00.000Z")
+    expect(formatted).toContain("End: 2026-01-16T10:30:00.000Z")
+    expect(formatted).toContain("## Summary")
+    expect(formatted).toContain("Agents: master, recon, enum")
+    expect(formatted).toContain("Tool Calls: 10 (8 success, 2 failed)")
+    expect(formatted).toContain("Phases: reconnaissance → enumeration")
+  })
+
+  test("should format timeline entries with TVAR", () => {
+    const log: Trajectory.EngagementLog = {
+      rootSessionID: "session-abc123",
+      startTime: "2026-01-16T10:00:00.000Z",
+      entries: [
+        {
+          timestamp: "2026-01-16T10:00:05.000Z",
+          agentName: "master",
+          sessionID: "session-abc123",
+          phase: "reconnaissance",
+          type: "tvar",
+          summary: "Starting pentest on target",
+          durationMs: 100,
+        },
+        {
+          timestamp: "2026-01-16T10:00:10.000Z",
+          agentName: "recon",
+          sessionID: "session-child1",
+          phase: "reconnaissance",
+          type: "tvar",
+          summary: "Beginning port scan",
+        },
+      ],
+      summary: {
+        totalAgents: 2,
+        agentNames: ["master", "recon"],
+        toolCalls: 0,
+        successfulTools: 0,
+        failedTools: 0,
+        phases: ["reconnaissance"],
+      },
+    }
+
+    const formatted = Trajectory.formatEngagementLog(log)
+
+    expect(formatted).toContain("## Timeline")
+    expect(formatted).toContain("10:00:05")
+    expect(formatted).toContain("[master]")
+    expect(formatted).toContain("💭") // TVAR icon
+    expect(formatted).toContain("(recon)") // phase abbreviation
+    expect(formatted).toContain("Starting pentest on target")
+    expect(formatted).toContain("(100ms)") // duration
+    expect(formatted).toContain("[recon]")
+    expect(formatted).toContain("Beginning port scan")
+  })
+
+  test("should format timeline entries with tools", () => {
+    const log: Trajectory.EngagementLog = {
+      rootSessionID: "session-abc123",
+      startTime: "2026-01-16T10:00:00.000Z",
+      entries: [
+        {
+          timestamp: "2026-01-16T10:00:05.000Z",
+          agentName: "recon",
+          sessionID: "session-child1",
+          type: "tool",
+          summary: "nmap: port_scan completed",
+          details: {
+            tool: "nmap",
+            toolStatus: "completed",
+          },
+          durationMs: 15000,
+        },
+      ],
+      summary: {
+        totalAgents: 1,
+        agentNames: ["recon"],
+        toolCalls: 1,
+        successfulTools: 1,
+        failedTools: 0,
+        phases: [],
+      },
+    }
+
+    const formatted = Trajectory.formatEngagementLog(log)
+
+    expect(formatted).toContain("🔧") // tool icon
+    expect(formatted).toContain("nmap: port_scan completed")
+    expect(formatted).toContain("(15000ms)")
+  })
+
+  test("should not repeat agent name for consecutive entries", () => {
+    const log: Trajectory.EngagementLog = {
+      rootSessionID: "session-abc123",
+      startTime: "2026-01-16T10:00:00.000Z",
+      entries: [
+        {
+          timestamp: "2026-01-16T10:00:05.000Z",
+          agentName: "recon",
+          sessionID: "session-child1",
+          type: "tvar",
+          summary: "First entry",
+        },
+        {
+          timestamp: "2026-01-16T10:00:06.000Z",
+          agentName: "recon",
+          sessionID: "session-child1",
+          type: "tvar",
+          summary: "Second entry",
+        },
+        {
+          timestamp: "2026-01-16T10:00:07.000Z",
+          agentName: "master",
+          sessionID: "session-abc123",
+          type: "tvar",
+          summary: "Third entry from different agent",
+        },
+      ],
+      summary: {
+        totalAgents: 2,
+        agentNames: ["recon", "master"],
+        toolCalls: 0,
+        successfulTools: 0,
+        failedTools: 0,
+        phases: [],
+      },
+    }
+
+    const formatted = Trajectory.formatEngagementLog(log)
+    const lines = formatted.split("\n")
+
+    // Find the timeline lines (after "## Timeline" and empty line)
+    const timelineStart = lines.findIndex((l) => l === "## Timeline") + 2
+    const timelineLines = lines.slice(timelineStart).filter((l) => l.trim())
+
+    // First recon entry should have [recon]
+    expect(timelineLines[0]).toContain("[recon]")
+
+    // Second recon entry should NOT have [recon] (same agent)
+    expect(timelineLines[1]).not.toContain("[recon]")
+
+    // Third entry should have [master] (different agent)
+    expect(timelineLines[2]).toContain("[master]")
+  })
+
+  test("should handle empty engagement log", () => {
+    const log: Trajectory.EngagementLog = {
+      rootSessionID: "session-empty",
+      startTime: "2026-01-16T10:00:00.000Z",
+      entries: [],
+      summary: {
+        totalAgents: 1,
+        agentNames: ["master"],
+        toolCalls: 0,
+        successfulTools: 0,
+        failedTools: 0,
+        phases: [],
+      },
+    }
+
+    const formatted = Trajectory.formatEngagementLog(log)
+
+    expect(formatted).toContain("# Engagement Log")
+    expect(formatted).toContain("Tool Calls: 0 (0 success, 0 failed)")
+    expect(formatted).toContain("## Timeline")
+    // No phase line since phases array is empty
+    expect(formatted).not.toContain("Phases:")
+  })
+
+  test("should handle entries without duration", () => {
+    const log: Trajectory.EngagementLog = {
+      rootSessionID: "session-abc123",
+      startTime: "2026-01-16T10:00:00.000Z",
+      entries: [
+        {
+          timestamp: "2026-01-16T10:00:05.000Z",
+          agentName: "master",
+          sessionID: "session-abc123",
+          type: "tvar",
+          summary: "Entry without duration",
+          // No durationMs
+        },
+      ],
+      summary: {
+        totalAgents: 1,
+        agentNames: ["master"],
+        toolCalls: 0,
+        successfulTools: 0,
+        failedTools: 0,
+        phases: [],
+      },
+    }
+
+    const formatted = Trajectory.formatEngagementLog(log)
+
+    expect(formatted).toContain("Entry without duration")
+    // Should not have duration suffix
+    expect(formatted).not.toMatch(/Entry without duration \(\d+ms\)/)
+  })
+})
+
+describe("Trajectory.EngagementLog types", () => {
+  test("EngagementLogEntry should have required fields", () => {
+    const entry: Trajectory.EngagementLogEntry = {
+      timestamp: "2026-01-16T10:00:00.000Z",
+      agentName: "recon",
+      sessionID: "session-123",
+      type: "tvar",
+      summary: "Test summary",
+    }
+
+    expect(entry.timestamp).toBeDefined()
+    expect(entry.agentName).toBeDefined()
+    expect(entry.sessionID).toBeDefined()
+    expect(entry.type).toBeDefined()
+    expect(entry.summary).toBeDefined()
+  })
+
+  test("EngagementLogEntry should support optional fields", () => {
+    const entry: Trajectory.EngagementLogEntry = {
+      timestamp: "2026-01-16T10:00:00.000Z",
+      agentName: "recon",
+      sessionID: "session-123",
+      type: "tool",
+      summary: "nmap: port scan",
+      phase: "reconnaissance",
+      durationMs: 5000,
+      details: {
+        tool: "nmap",
+        toolStatus: "completed",
+        thought: "Scanning for ports",
+      },
+    }
+
+    expect(entry.phase).toBe("reconnaissance")
+    expect(entry.durationMs).toBe(5000)
+    expect(entry.details?.tool).toBe("nmap")
+    expect(entry.details?.toolStatus).toBe("completed")
+    expect(entry.details?.thought).toBe("Scanning for ports")
+  })
+
+  test("EngagementLog should have required summary fields", () => {
+    const log: Trajectory.EngagementLog = {
+      rootSessionID: "session-root",
+      startTime: "2026-01-16T10:00:00.000Z",
+      entries: [],
+      summary: {
+        totalAgents: 2,
+        agentNames: ["master", "recon"],
+        toolCalls: 5,
+        successfulTools: 4,
+        failedTools: 1,
+        phases: ["reconnaissance"],
+      },
+    }
+
+    expect(log.rootSessionID).toBe("session-root")
+    expect(log.summary.totalAgents).toBe(2)
+    expect(log.summary.agentNames).toEqual(["master", "recon"])
+    expect(log.summary.toolCalls).toBe(5)
+    expect(log.summary.successfulTools).toBe(4)
+    expect(log.summary.failedTools).toBe(1)
+    expect(log.summary.phases).toEqual(["reconnaissance"])
+  })
+})

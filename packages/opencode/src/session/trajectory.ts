@@ -11,10 +11,17 @@
  * - REQ-RSN-032: Exportable in training-compatible format
  * - REQ-RSN-033: Include timing information
  *
+ * Requirements (Feature 06):
+ * - REQ-SES-010: Engagement log aggregation across parent/child sessions
+ * - REQ-SES-011: Show all TVAR reasoning steps from all agents in timeline order
+ * - REQ-SES-012: Include agent name for each step
+ * - REQ-SES-014: Exportable for post-engagement analysis
+ *
  * Supports:
  * - Anonymization of IPs, hostnames, and credentials
  * - Anti-pattern detection for negative training data
  * - Multiple export formats (JSON, JSONL, ShareGPT)
+ * - Engagement log aggregation across sub-agents
  */
 
 import { MessageV2 } from "./message-v2"
@@ -440,6 +447,303 @@ ${step.action ? `<action>\n${step.action}\n</action>\n\n` : ""}${step.result ? `
       if (trajectory.outcome.flagsCaptured?.length) {
         lines.push(`Flags: ${trajectory.outcome.flagsCaptured.join(", ")}`)
       }
+    }
+
+    return lines.join("\n")
+  }
+
+  // ===========================================================================
+  // Feature 06: Engagement Log Aggregation
+  // ===========================================================================
+
+  /**
+   * A single entry in the engagement log (consolidated view across all agents)
+   */
+  export interface EngagementLogEntry {
+    timestamp: string
+    agentName: string
+    sessionID: string
+    phase?: string
+    type: "tvar" | "tool"
+    summary: string
+    details?: {
+      tool?: string
+      toolStatus?: string
+      thought?: string
+      verify?: string
+      action?: string
+      result?: string
+    }
+    durationMs?: number
+  }
+
+  /**
+   * Engagement log aggregating all sub-agent activity
+   */
+  export interface EngagementLog {
+    rootSessionID: string
+    startTime: string
+    endTime?: string
+    entries: EngagementLogEntry[]
+    summary: {
+      totalAgents: number
+      agentNames: string[]
+      toolCalls: number
+      successfulTools: number
+      failedTools: number
+      phases: string[]
+    }
+  }
+
+  /**
+   * Get all child sessions recursively
+   */
+  async function getChildSessionsRecursive(sessionID: string): Promise<Session.Info[]> {
+    const children = await Session.children(sessionID)
+    const all: Session.Info[] = [...children]
+    for (const child of children) {
+      const grandchildren = await getChildSessionsRecursive(child.id)
+      all.push(...grandchildren)
+    }
+    return all
+  }
+
+  /**
+   * Extract agent name from session title
+   * Titles follow pattern: "@{agentName} subagent: {description}" or "New session - ..."
+   */
+  function extractAgentName(title: string, isRoot: boolean): string {
+    if (isRoot) return "master"
+
+    // Match pattern: @agentName subagent
+    const match = title.match(/@(\w+)\s+subagent/)
+    if (match) return match[1]
+
+    // Match pattern: Child session for {agentName}
+    const childMatch = title.match(/Child session.*?for\s+(\w+)/i)
+    if (childMatch) return childMatch[1]
+
+    // Fallback to "subagent"
+    return "subagent"
+  }
+
+  /**
+   * Process a single session and extract log entries
+   */
+  async function processSessionForEngagementLog(
+    sessionID: string,
+    agentName: string,
+    entries: EngagementLogEntry[],
+    agentSet: Set<string>,
+    phaseSet: Set<string>,
+    callbacks: {
+      onToolCall: () => void
+      onToolSuccess: () => void
+      onToolFail: () => void
+    },
+  ): Promise<void> {
+    agentSet.add(agentName)
+    const messages = await Session.messages({ sessionID })
+
+    for (const msg of messages) {
+      for (const part of msg.parts) {
+        if (part.type === "tvar") {
+          if (part.phase) phaseSet.add(part.phase)
+
+          // Extract first line of thought as summary (max 100 chars)
+          const summaryLine = part.thought.split("\n")[0].substring(0, 100)
+
+          entries.push({
+            timestamp: new Date(part.time.start).toISOString(),
+            agentName,
+            sessionID,
+            phase: part.phase,
+            type: "tvar",
+            summary: summaryLine,
+            details: {
+              thought: part.thought,
+              verify: part.verify,
+              action: part.action,
+              result: part.result,
+            },
+            durationMs: part.time.end ? part.time.end - part.time.start : undefined,
+          })
+        } else if (part.type === "tool") {
+          callbacks.onToolCall()
+
+          const state = part.state
+          let title: string
+          let startMs: number | undefined
+          let endMs: number | undefined
+          let toolStatus: string = state.status
+
+          if (state.status === "completed") {
+            callbacks.onToolSuccess()
+            title = state.title
+            startMs = state.time?.start
+            endMs = state.time?.end
+          } else if (state.status === "error") {
+            callbacks.onToolFail()
+            title = state.error
+            startMs = state.time?.start
+            endMs = state.time?.end
+          } else if (state.status === "running") {
+            title = part.tool
+            startMs = state.time?.start
+          } else {
+            // pending
+            title = part.tool
+          }
+
+          entries.push({
+            timestamp: startMs ? new Date(startMs).toISOString() : new Date().toISOString(),
+            agentName,
+            sessionID,
+            type: "tool",
+            summary: `${part.tool}: ${title.substring(0, 80)}`,
+            details: {
+              tool: part.tool,
+              toolStatus,
+            },
+            durationMs: startMs && endMs ? endMs - startMs : undefined,
+          })
+        }
+      }
+    }
+  }
+
+  /**
+   * Create engagement log from root session and all sub-agents.
+   * Aggregates TVAR reasoning and tool calls across the entire session tree.
+   *
+   * REQ-SES-010: Engagement log aggregation across parent/child sessions
+   * REQ-SES-011: Show all TVAR reasoning steps from all agents in timeline order
+   * REQ-SES-012: Include agent name for each step
+   */
+  export async function fromEngagement(rootSessionID: string): Promise<EngagementLog> {
+    const entries: EngagementLogEntry[] = []
+    const agentSet = new Set<string>()
+    const phaseSet = new Set<string>()
+    let toolCalls = 0
+    let successfulTools = 0
+    let failedTools = 0
+    let startTime: number | undefined
+    let endTime: number | undefined
+
+    // Get root session info
+    const rootSession = await Session.get(rootSessionID)
+    if (rootSession.time.created) startTime = rootSession.time.created
+    if (rootSession.time.updated) endTime = rootSession.time.updated
+
+    const callbacks = {
+      onToolCall: () => toolCalls++,
+      onToolSuccess: () => successfulTools++,
+      onToolFail: () => failedTools++,
+    }
+
+    // Process root session
+    await processSessionForEngagementLog(rootSessionID, "master", entries, agentSet, phaseSet, callbacks)
+
+    // Get all child sessions and process them
+    const children = await getChildSessionsRecursive(rootSessionID)
+    for (const child of children) {
+      const agentName = extractAgentName(child.title, false)
+      agentSet.add(agentName)
+
+      // Track latest end time
+      if (child.time.updated && (!endTime || child.time.updated > endTime)) {
+        endTime = child.time.updated
+      }
+
+      await processSessionForEngagementLog(child.id, agentName, entries, agentSet, phaseSet, callbacks)
+    }
+
+    // Sort entries by timestamp
+    entries.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+
+    return {
+      rootSessionID,
+      startTime: startTime ? new Date(startTime).toISOString() : new Date().toISOString(),
+      endTime: endTime ? new Date(endTime).toISOString() : undefined,
+      entries,
+      summary: {
+        totalAgents: agentSet.size,
+        agentNames: Array.from(agentSet),
+        toolCalls,
+        successfulTools,
+        failedTools,
+        phases: Array.from(phaseSet),
+      },
+    }
+  }
+
+  /**
+   * Format engagement log for CLI display.
+   *
+   * Output format:
+   * ```
+   * # Engagement Log
+   * Root Session: abc123
+   * Start: 2026-01-16T10:00:00Z
+   *
+   * ## Summary
+   * - Agents: master, recon, enum
+   * - Tool Calls: 15 (12 success, 3 failed)
+   * - Phases: reconnaissance → enumeration
+   *
+   * ## Timeline
+   *
+   * 10:00:00 [master]    💭 (recon) Starting pentest...
+   * 10:00:05 [recon]     🔧        nmap: port_scan completed (15000ms)
+   * ```
+   */
+  export function formatEngagementLog(engagementLog: EngagementLog): string {
+    const lines: string[] = []
+
+    // Header
+    lines.push("# Engagement Log")
+    lines.push(`Root Session: ${engagementLog.rootSessionID}`)
+    lines.push(`Start: ${engagementLog.startTime}`)
+    if (engagementLog.endTime) lines.push(`End: ${engagementLog.endTime}`)
+    lines.push("")
+
+    // Summary
+    lines.push("## Summary")
+    lines.push(`- Agents: ${engagementLog.summary.agentNames.join(", ")}`)
+    lines.push(
+      `- Tool Calls: ${engagementLog.summary.toolCalls} (${engagementLog.summary.successfulTools} success, ${engagementLog.summary.failedTools} failed)`,
+    )
+    if (engagementLog.summary.phases.length > 0) {
+      lines.push(`- Phases: ${engagementLog.summary.phases.join(" → ")}`)
+    }
+    lines.push("")
+
+    // Timeline
+    lines.push("## Timeline")
+    lines.push("")
+
+    // Track last agent to avoid repetition
+    let lastAgent = ""
+    const maxAgentLen = Math.max(...engagementLog.summary.agentNames.map((n) => n.length), 8)
+
+    for (const entry of engagementLog.entries) {
+      // Extract time (HH:MM:SS)
+      const time = entry.timestamp.split("T")[1]?.substring(0, 8) || ""
+
+      // Format agent name (show on first occurrence, then pad)
+      const agentDisplay =
+        entry.agentName !== lastAgent ? `[${entry.agentName}]`.padEnd(maxAgentLen + 2) : " ".repeat(maxAgentLen + 2)
+      lastAgent = entry.agentName
+
+      // Icon and phase
+      const icon = entry.type === "tool" ? "🔧" : "💭"
+      const phase = entry.phase ? `(${entry.phase.substring(0, 5)})` : "      "
+
+      // Duration
+      const duration = entry.durationMs ? ` (${entry.durationMs}ms)` : ""
+
+      // Build line
+      lines.push(`${time} ${agentDisplay} ${icon} ${phase} ${entry.summary}${duration}`)
     }
 
     return lines.join("\n")
