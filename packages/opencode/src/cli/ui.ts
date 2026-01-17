@@ -4,10 +4,10 @@ import { NamedError } from "@opencode-ai/util/error"
 
 export namespace UI {
   const LOGO = [
-    [`                    `, `             ▄     `],
-    [`█▀▀█ █▀▀█ █▀▀█ █▀▀▄ `, `█▀▀▀ █▀▀█ █▀▀█ █▀▀█`],
-    [`█░░█ █░░█ █▀▀▀ █░░█ `, `█░░░ █░░█ █░░█ █▀▀▀`],
-    [`▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ `, `▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀`],
+    [`                    `, `                          `],
+    [`█▀▀█ █▀▀█ █▀▀▀ █▀▀▄ `, `█▀▀▀ █▀▀█ █░░░ █▀▀█ ▀█▀ ▀█▀`],
+    [`█░░█ █▀▀▀ █▀▀▀ █░░█ `, `▀▀▀█ █▀▀▀ █░░░ █░░█ ░█░ ░█░`],
+    [`▀▀▀▀ ▀░░░ ▀▀▀▀ ▀  ▀ `, `▀▀▀▀ ▀░░░ ▀▀▀▀ ▀▀▀▀ ▀▀▀ ░▀░`],
   ]
 
   export const CancelledError = NamedError.create("UICancelledError", z.void())
@@ -52,8 +52,9 @@ export namespace UI {
       if (pad) result.push(pad)
       result.push(Bun.color("gray", "ansi"))
       result.push(row[0])
-      result.push("\x1b[0m")
+      result.push(Style.TEXT_DANGER)
       result.push(row[1])
+      result.push(Style.TEXT_NORMAL)
       result.push(EOL)
     }
     return result.join("").trimEnd()

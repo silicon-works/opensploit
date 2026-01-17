@@ -72,7 +72,7 @@ export namespace Config {
     }
 
     // Project config has highest precedence (overrides global and remote)
-    for (const file of ["opencode.jsonc", "opencode.json"]) {
+    for (const file of ["opensploit.jsonc", "opensploit.json"]) {
       const found = await Filesystem.findUp(file, Instance.directory, Instance.worktree)
       for (const resolved of found.toReversed()) {
         result = mergeConfigConcatArrays(result, await loadFile(resolved))
@@ -93,14 +93,14 @@ export namespace Config {
       Global.Path.config,
       ...(await Array.fromAsync(
         Filesystem.up({
-          targets: [".opencode"],
+          targets: [".opensploit"],
           start: Instance.directory,
           stop: Instance.worktree,
         }),
       )),
       ...(await Array.fromAsync(
         Filesystem.up({
-          targets: [".opencode"],
+          targets: [".opensploit"],
           start: Global.Path.home,
           stop: Global.Path.home,
         }),
@@ -113,8 +113,8 @@ export namespace Config {
     }
 
     for (const dir of unique(directories)) {
-      if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
-        for (const file of ["opencode.jsonc", "opencode.json"]) {
+      if (dir.endsWith(".opensploit") || dir === Flag.OPENCODE_CONFIG_DIR) {
+        for (const file of ["opensploit.jsonc", "opensploit.json"]) {
           log.debug(`loading config from ${path.join(dir, file)}`)
           result = mergeConfigConcatArrays(result, await loadFile(path.join(dir, file)))
           // to satisfy the type checker
@@ -243,7 +243,7 @@ export namespace Config {
       })
       if (!md) continue
 
-      const patterns = ["/.opencode/command/", "/.opencode/commands/", "/command/", "/commands/"]
+      const patterns = ["/.opensploit/command/", "/.opensploit/commands/", "/command/", "/commands/"]
       const file = rel(item, patterns) ?? path.basename(item)
       const name = trim(file)
 
@@ -283,7 +283,7 @@ export namespace Config {
       })
       if (!md) continue
 
-      const patterns = ["/.opencode/agent/", "/.opencode/agents/", "/agent/", "/agents/"]
+      const patterns = ["/.opensploit/agent/", "/.opensploit/agents/", "/agent/", "/agents/"]
       const file = rel(item, patterns) ?? path.basename(item)
       const agentName = trim(file)
 
@@ -379,9 +379,9 @@ export namespace Config {
    * Deduplicates plugins by name, with later entries (higher priority) winning.
    * Priority order (highest to lowest):
    * 1. Local plugin/ directory
-   * 2. Local opencode.json
+   * 2. Local opensploit.json
    * 3. Global plugin/ directory
-   * 4. Global opencode.json
+   * 4. Global opensploit.json
    *
    * Since plugins are added in low-to-high priority order,
    * we reverse, deduplicate (keeping first occurrence), then restore order.
@@ -869,7 +869,7 @@ export namespace Config {
       keybinds: Keybinds.optional().describe("Custom keybind configurations"),
       logLevel: Log.Level.optional().describe("Log level"),
       tui: TUI.optional().describe("TUI specific settings"),
-      server: Server.optional().describe("Server configuration for opencode serve and web commands"),
+      server: Server.optional().describe("Server configuration for opensploit serve and web commands"),
       command: z
         .record(z.string(), Command)
         .optional()
@@ -1088,8 +1088,8 @@ export namespace Config {
     let result: Info = pipe(
       {},
       mergeDeep(await loadFile(path.join(Global.Path.config, "config.json"))),
-      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.json"))),
-      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.jsonc"))),
+      mergeDeep(await loadFile(path.join(Global.Path.config, "opensploit.json"))),
+      mergeDeep(await loadFile(path.join(Global.Path.config, "opensploit.jsonc"))),
     )
 
     await import(path.join(Global.Path.config, "config"), {
