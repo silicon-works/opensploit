@@ -17,6 +17,7 @@
  * │   ├── enum.md             # Enumeration findings
  * │   ├── exploit.md          # Exploitation findings
  * │   └── post-exploit.md     # Post-exploitation findings
+ * ├── wordlists/              # Custom wordlists for brute-forcing
  * └── artifacts/
  *     ├── screenshots/        # Screenshot evidence
  *     └── loot/               # Captured files, credentials
@@ -43,6 +44,7 @@ export function create(sessionID: string): string {
 
     // Create standard subdirectories
     mkdirSync(join(dir, "findings"), { recursive: true })
+    mkdirSync(join(dir, "wordlists"), { recursive: true })
     mkdirSync(join(dir, "artifacts"), { recursive: true })
     mkdirSync(join(dir, "artifacts", "screenshots"), { recursive: true })
     mkdirSync(join(dir, "artifacts", "loot"), { recursive: true })
@@ -98,6 +100,13 @@ export function findingsDir(sessionID: string): string {
  */
 export function artifactsDir(sessionID: string): string {
   return join(get(sessionID), "artifacts")
+}
+
+/**
+ * Get wordlists directory path.
+ */
+export function wordlistsDir(sessionID: string): string {
+  return join(get(sessionID), "wordlists")
 }
 
 /**

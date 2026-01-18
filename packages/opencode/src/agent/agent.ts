@@ -256,6 +256,8 @@ export namespace Agent {
           PermissionNext.fromConfig({
             "*": "deny",
             read: "allow",
+            write: "allow", // For findings files
+            edit: "allow", // For findings files
             glob: "allow",
             grep: "allow",
             task: "allow",
@@ -290,6 +292,8 @@ export namespace Agent {
           PermissionNext.fromConfig({
             "*": "deny",
             read: "allow",
+            write: "allow", // For findings files
+            edit: "allow", // For findings files
             glob: "allow",
             grep: "allow",
             task: "allow",
@@ -424,6 +428,8 @@ export namespace Agent {
           PermissionNext.fromConfig({
             "*": "deny",
             read: "allow",
+            write: "allow", // For findings files
+            edit: "allow", // For findings files
             glob: "allow",
             grep: "allow",
             webfetch: "allow",

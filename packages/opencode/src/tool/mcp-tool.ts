@@ -7,6 +7,7 @@ import { TargetValidation } from "./target-validation"
 import { PhaseGating } from "./phase-gating"
 import { Permission } from "../permission"
 import { getRootSession } from "../session/hierarchy"
+import * as SessionDirectory from "../session/directory"
 import path from "path"
 import os from "os"
 import fs from "fs/promises"
@@ -183,8 +184,15 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
   async execute(params, ctx): Promise<ToolResult> {
     const { tool: toolName, method, args = {} } = params
     const sessionId = ctx.sessionID
+    const rootSessionId = getRootSession(sessionId)
 
-    log.info("invoking mcp tool", { toolName, method, args, sessionId })
+    // Ensure session directory exists (for wordlists, artifacts, etc.)
+    if (!SessionDirectory.exists(rootSessionId)) {
+      SessionDirectory.create(rootSessionId)
+    }
+    const sessionDir = SessionDirectory.get(rootSessionId)
+
+    log.info("invoking mcp tool", { toolName, method, args, sessionId, rootSessionId })
 
     // Get registry to find the image
     const registry = await getRegistry()
@@ -325,7 +333,10 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
           toolDef.image,
           method,
           args as Record<string, unknown>,
-          { privileged: toolDef.requirements?.privileged ?? false }
+          {
+            privileged: toolDef.requirements?.privileged ?? false,
+            sessionDir,
+          }
         )
       }
 
@@ -353,7 +364,6 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
       // This prevents context overflow by storing large outputs externally
       // and returning a summary with a reference ID
       // Use ROOT session ID so outputs are accessible to all agents in the tree
-      const rootSessionId = getRootSession(sessionId)
       const storeResult = await storeOutput({
         sessionId: rootSessionId,
         tool: toolName,

@@ -107,6 +107,8 @@ export namespace ContainerManager {
 
   export interface ContainerOptions {
     privileged?: boolean
+    /** Session directory to mount as /session/ inside container */
+    sessionDir?: string
   }
 
   /**
@@ -147,6 +149,11 @@ export namespace ContainerManager {
     if (options?.privileged) {
       dockerArgs.push("--privileged")
       log.info("running container in privileged mode", { toolName, image })
+    }
+    // Mount session directory for wordlists, artifacts, etc.
+    if (options?.sessionDir) {
+      dockerArgs.push("-v", `${options.sessionDir}:/session:rw`)
+      log.info("mounting session directory", { toolName, sessionDir: options.sessionDir })
     }
     dockerArgs.push(image)
 

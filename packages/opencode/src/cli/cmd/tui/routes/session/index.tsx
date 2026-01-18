@@ -68,6 +68,8 @@ import { Editor } from "../../util/editor"
 import stripAnsi from "strip-ansi"
 import { Footer } from "./footer.tsx"
 import { usePromptRef } from "../../context/prompt"
+import "opentui-spinner/solid"
+import { createColors, createFrames } from "../../ui/spinner.ts"
 import { useExit } from "../../context/exit"
 import { useArgs } from "../../context/args"
 import { Filesystem } from "@/util/filesystem"
@@ -1101,6 +1103,10 @@ export function Session() {
                 }}
                 sessionID={route.sessionID}
               />
+              {/* Show status indicator for sub-agent sessions (Prompt is hidden for them) */}
+              <Show when={session()?.parentID}>
+                <SubagentStatus sessionID={route.sessionID} />
+              </Show>
             </box>
           </Show>
           <Toast />
@@ -1740,6 +1746,63 @@ function InlineTool(props: {
         <text fg={theme.error}>{error()}</text>
       </Show>
     </box>
+  )
+}
+
+/**
+ * SubagentStatus - Shows spinner and status for sub-agent sessions
+ * When viewing a sub-agent session, the Prompt component is hidden (no input needed).
+ * This component displays the working status with spinner animation.
+ */
+function SubagentStatus(props: { sessionID: string }) {
+  const { theme } = useTheme()
+  const sync = useSync()
+  const local = useLocal()
+  const kv = useKV()
+
+  const status = createMemo(() => sync.data.session_status?.[props.sessionID] ?? { type: "idle" })
+  const session = createMemo(() => sync.session.get(props.sessionID))
+
+  // Extract agent name from session title (format: "description (@agent-name subagent)")
+  const agentName = createMemo(() => {
+    const title = session()?.title ?? ""
+    const match = title.match(/@([^\s)]+)\s+subagent/)
+    return match?.[1] ?? "subagent"
+  })
+
+  const color = createMemo(() => local.agent.color(agentName()))
+
+  const spinnerDef = createMemo(() => {
+    return {
+      frames: createFrames({
+        color: color(),
+        style: "blocks",
+        inactiveFactor: 0.6,
+        minAlpha: 0.3,
+      }),
+      color: createColors({
+        color: color(),
+        style: "blocks",
+        inactiveFactor: 0.6,
+        minAlpha: 0.3,
+      }),
+    }
+  })
+
+  return (
+    <Show when={status().type !== "idle"}>
+      <box paddingLeft={1} paddingTop={1} flexDirection="row" gap={1}>
+        <Show when={kv.get("animations_enabled", true)} fallback={<text fg={theme.textMuted}>[⋯]</text>}>
+          <spinner color={spinnerDef().color} frames={spinnerDef().frames} interval={40} />
+        </Show>
+        <text fg={theme.textMuted}>
+          {Locale.titlecase(agentName())} working...
+        </text>
+        <text fg={theme.text}>
+          esc <span style={{ fg: theme.textMuted }}>interrupt</span>
+        </text>
+      </box>
+    </Show>
   )
 }
 
