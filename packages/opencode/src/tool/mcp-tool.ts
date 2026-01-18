@@ -39,6 +39,10 @@ interface RegistryTool {
     privileged?: boolean
     local_only?: boolean // Cannot run in Docker
   }
+  // Service container configuration (for VPN, proxies, etc.)
+  service?: boolean // Mark as a service container that persists
+  service_name?: string // Name for network sharing (e.g., "vpn")
+  use_service?: string // Use network from this service (e.g., "vpn")
 }
 
 interface Registry {
@@ -327,6 +331,18 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
           }
         }
 
+        // Determine service network to use
+        // 1. Tool explicitly specifies use_service
+        // 2. VPN service is active and tool needs network
+        let useServiceNetwork: string | undefined
+        if (toolDef.use_service) {
+          useServiceNetwork = toolDef.use_service
+        } else if (!toolDef.service && ContainerManager.isServiceActive("vpn")) {
+          // Automatically use VPN network for network-enabled tools
+          useServiceNetwork = "vpn"
+          log.info("routing through VPN service", { toolName })
+        }
+
         // Call the tool via container manager
         result = await ContainerManager.callTool(
           toolName,
@@ -336,6 +352,9 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
           {
             privileged: toolDef.requirements?.privileged ?? false,
             sessionDir,
+            isService: toolDef.service,
+            serviceName: toolDef.service_name,
+            useServiceNetwork,
           }
         )
       }

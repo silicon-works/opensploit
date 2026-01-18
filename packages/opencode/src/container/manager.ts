@@ -20,10 +20,16 @@ export namespace ContainerManager {
     transport: StdioClientTransport
     lastUsed: number
     startedAt: number
+    isService?: boolean
+    serviceName?: string
+    dockerContainerId?: string // Actual Docker container ID for network sharing
   }
 
   // Track running containers
   const containers = new Map<string, ManagedContainer>()
+
+  // Track active service containers by service name for network sharing
+  const serviceContainers = new Map<string, string>() // serviceName -> toolName
   let cleanupInterval: ReturnType<typeof setInterval> | null = null
 
   /**
@@ -109,6 +115,48 @@ export namespace ContainerManager {
     privileged?: boolean
     /** Session directory to mount as /session/ inside container */
     sessionDir?: string
+    /** Mark this as a service container that persists and shares network */
+    isService?: boolean
+    /** Service name for network sharing (e.g., "vpn") */
+    serviceName?: string
+    /** Use network from an existing service container */
+    useServiceNetwork?: string
+  }
+
+  /**
+   * Get the Docker container ID for a running container
+   */
+  async function getDockerContainerId(containerName: string): Promise<string | undefined> {
+    try {
+      // List running containers and find the one running our image
+      const proc = spawn(["docker", "ps", "--filter", `name=${containerName}`, "--format", "{{.ID}}"], {
+        stdout: "pipe",
+        stderr: "ignore",
+      })
+      const output = await new Response(proc.stdout).text()
+      const containerId = output.trim().split("\n")[0]
+      return containerId || undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * Get the active service container's Docker ID for network sharing
+   */
+  export function getActiveServiceNetwork(serviceName: string): string | undefined {
+    const toolName = serviceContainers.get(serviceName)
+    if (!toolName) return undefined
+
+    const container = containers.get(toolName)
+    return container?.dockerContainerId
+  }
+
+  /**
+   * Check if a service is currently active
+   */
+  export function isServiceActive(serviceName: string): boolean {
+    return serviceContainers.has(serviceName)
   }
 
   /**
@@ -134,7 +182,9 @@ export namespace ContainerManager {
     }
 
     // Start container with stdio
-    log.info("starting container", { toolName, image })
+    const isService = options?.isService ?? false
+    const serviceName = options?.serviceName
+    log.info("starting container", { toolName, image, isService, serviceName })
 
     // Create a dummy proc reference for tracking (actual process is managed by transport)
     const dummyProc = spawn(["echo"], { stdout: "ignore", stderr: "ignore" })
@@ -144,8 +194,39 @@ export namespace ContainerManager {
       version: Installation.VERSION,
     })
 
+    // Generate container name for service containers (needed for network sharing)
+    const containerName = isService ? `opensploit-${serviceName || toolName}-${Date.now()}` : undefined
+
     // Build docker run args based on options
-    const dockerArgs = ["run", "--rm", "-i", "--network=host"]
+    const dockerArgs = ["run", "-i"]
+
+    // Service containers persist (no --rm), regular containers are removed on exit
+    if (!isService) {
+      dockerArgs.push("--rm")
+    }
+
+    // Add container name for service containers
+    if (containerName) {
+      dockerArgs.push("--name", containerName)
+    }
+
+    // Network configuration
+    if (options?.useServiceNetwork) {
+      // Use network from existing service container
+      const serviceDockerContainerId = getActiveServiceNetwork(options.useServiceNetwork)
+      if (serviceDockerContainerId) {
+        dockerArgs.push("--network", `container:${serviceDockerContainerId}`)
+        log.info("using service network", { toolName, serviceName: options.useServiceNetwork, containerId: serviceDockerContainerId })
+      } else {
+        // Fall back to host network if service not available
+        dockerArgs.push("--network=host")
+        log.warn("service network not available, using host network", { toolName, serviceName: options.useServiceNetwork })
+      }
+    } else {
+      // Default to host network
+      dockerArgs.push("--network=host")
+    }
+
     if (options?.privileged) {
       dockerArgs.push("--privileged")
       log.info("running container in privileged mode", { toolName, image })
@@ -168,11 +249,28 @@ export namespace ContainerManager {
       await client.connect(stdioTransport)
     } catch (error) {
       log.error("failed to connect to container", { toolName, image, error: String(error) })
+      // Clean up named container if it was created
+      if (containerName) {
+        spawn(["docker", "rm", "-f", containerName], { stdout: "ignore", stderr: "ignore" })
+      }
       throw new Error(`Failed to connect to MCP server in container: ${error}`)
     }
 
     // Get container ID for tracking
     const containerId = `${toolName}-${Date.now()}`
+
+    // For service containers, get the actual Docker container ID for network sharing
+    let dockerContainerId: string | undefined
+    if (isService && containerName) {
+      // Wait a moment for container to be fully registered
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      dockerContainerId = await getDockerContainerId(containerName)
+      if (dockerContainerId) {
+        log.info("service container started", { toolName, serviceName, dockerContainerId })
+      } else {
+        log.warn("could not get docker container ID for service", { toolName, containerName })
+      }
+    }
 
     const managed: ManagedContainer = {
       id: containerId,
@@ -183,14 +281,23 @@ export namespace ContainerManager {
       transport: stdioTransport,
       lastUsed: Date.now(),
       startedAt: Date.now(),
+      isService,
+      serviceName,
+      dockerContainerId,
     }
 
     containers.set(toolName, managed)
 
+    // Track service container for network sharing
+    if (isService && serviceName) {
+      serviceContainers.set(serviceName, toolName)
+      log.info("registered service container", { serviceName, toolName, dockerContainerId })
+    }
+
     // Ensure cleanup interval is running
     startCleanupInterval()
 
-    log.info("container started", { toolName, image, containerId })
+    log.info("container started", { toolName, image, containerId, isService, serviceName })
 
     return client
   }
@@ -204,12 +311,32 @@ export namespace ContainerManager {
       return
     }
 
-    log.info("stopping container", { toolName, image: container.image })
+    log.info("stopping container", { toolName, image: container.image, isService: container.isService })
 
     try {
       await container.client.close()
     } catch (error) {
       log.debug("error closing client", { toolName, error: String(error) })
+    }
+
+    // For service containers, we need to explicitly remove the Docker container
+    // since they don't use --rm
+    if (container.isService && container.dockerContainerId) {
+      try {
+        const proc = spawn(["docker", "rm", "-f", container.dockerContainerId], {
+          stdout: "ignore",
+          stderr: "ignore",
+        })
+        await proc.exited
+        log.info("removed service container", { toolName, dockerContainerId: container.dockerContainerId })
+      } catch (error) {
+        log.debug("error removing service container", { toolName, error: String(error) })
+      }
+    }
+
+    // Remove from service tracking
+    if (container.isService && container.serviceName) {
+      serviceContainers.delete(container.serviceName)
     }
 
     containers.delete(toolName)
@@ -239,6 +366,11 @@ export namespace ContainerManager {
     cleanupInterval = setInterval(() => {
       const now = Date.now()
       for (const [toolName, container] of containers) {
+        // Skip service containers - they should persist for the session
+        if (container.isService) {
+          continue
+        }
+
         if (now - container.lastUsed > IDLE_TIMEOUT_MS) {
           log.info("stopping idle container", { toolName, idleMs: now - container.lastUsed })
           stopContainer(toolName).catch((error) => {
@@ -264,6 +396,8 @@ export namespace ContainerManager {
     startedAt: number
     lastUsed: number
     idleMs: number
+    isService?: boolean
+    serviceName?: string
   }> {
     const now = Date.now()
     return Array.from(containers.values()).map((c) => ({
@@ -272,7 +406,16 @@ export namespace ContainerManager {
       startedAt: c.startedAt,
       lastUsed: c.lastUsed,
       idleMs: now - c.lastUsed,
+      isService: c.isService,
+      serviceName: c.serviceName,
     }))
+  }
+
+  /**
+   * Get list of active service names
+   */
+  export function getActiveServices(): string[] {
+    return Array.from(serviceContainers.keys())
   }
 
   /**
