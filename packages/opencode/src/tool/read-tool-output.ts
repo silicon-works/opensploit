@@ -13,6 +13,7 @@ import z from "zod"
 import { Tool } from "./tool"
 import { Log } from "../util/log"
 import * as OutputStore from "./output-store"
+import { getRootSession } from "../session/hierarchy"
 
 const log = Log.create({ service: "tool.read-tool-output" })
 
@@ -33,17 +34,16 @@ reference ID is returned. Use this tool to query the full results.
    - \`admin\` - find records containing "admin" in any field
 
 **Parameters:**
-- \`id\`: Reference ID from the stored output (e.g., "output_xxx")
-- \`session_id\`: Session ID to scope the lookup
-- \`query\`: Field:value query or text search
+- \`id\`: Reference ID from the stored output (e.g., "out_xxx")
+- \`query\`: Field:value query or text search (optional)
 - \`type\`: Filter by record type (e.g., "port", "directory", "vulnerability")
 - \`limit\`: Maximum records to return (default: 50)
 
 **Examples:**
 \`\`\`
-read_tool_output(id="output_abc", session_id="session_xyz", query="port:22")
-read_tool_output(id="output_abc", session_id="session_xyz", query="open")
-read_tool_output(id="output_abc", session_id="session_xyz", type="vulnerability")
+read_tool_output(id="out_abc", query="port:22")
+read_tool_output(id="out_abc", query="open")
+read_tool_output(id="out_abc", type="vulnerability")
 \`\`\`
 `
 
@@ -51,13 +51,16 @@ export const ReadToolOutputTool = Tool.define("read_tool_output", {
   description: DESCRIPTION,
   parameters: z.object({
     id: z.string().describe("Reference ID of the stored output"),
-    session_id: z.string().describe("Session ID to scope the lookup"),
     query: z.string().optional().describe("Field:value query (e.g., 'port:22') or text search"),
     type: z.string().optional().describe("Filter by record type (e.g., 'port', 'directory')"),
     limit: z.number().optional().default(50).describe("Maximum records to return (default: 50)"),
   }),
   async execute(params, ctx) {
-    const { id, session_id, query, type, limit = 50 } = params
+    const { id, query, type, limit = 50 } = params
+
+    // Auto-detect session ID from context using root session
+    // This ensures outputs stored by any agent in the tree are accessible
+    const session_id = getRootSession(ctx.sessionID)
 
     log.info("read_tool_output", { id, session_id, query, type, limit })
 

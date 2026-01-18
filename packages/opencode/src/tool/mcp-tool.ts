@@ -6,6 +6,7 @@ import { store as storeOutput } from "./output-store"
 import { TargetValidation } from "./target-validation"
 import { PhaseGating } from "./phase-gating"
 import { Permission } from "../permission"
+import { getRootSession } from "../session/hierarchy"
 import path from "path"
 import os from "os"
 import fs from "fs/promises"
@@ -351,8 +352,10 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
       // Use output store to handle large outputs
       // This prevents context overflow by storing large outputs externally
       // and returning a summary with a reference ID
+      // Use ROOT session ID so outputs are accessible to all agents in the tree
+      const rootSessionId = getRootSession(sessionId)
       const storeResult = await storeOutput({
-        sessionId,
+        sessionId: rootSessionId,
         tool: toolName,
         method,
         data: typeof result === "object" ? result : null,

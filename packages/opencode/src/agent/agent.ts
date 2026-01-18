@@ -432,6 +432,7 @@ export namespace Agent {
             tool_registry_search: "allow",
             mcp_tool: "allow",
             read_engagement_state: "allow",
+            read_tool_output: "allow",
           }),
           user,
         ),
