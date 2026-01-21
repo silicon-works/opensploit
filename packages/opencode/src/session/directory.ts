@@ -27,6 +27,7 @@ import { tmpdir } from "os"
 import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from "fs"
 import { join } from "path"
 import { Log } from "../util/log"
+import { getRootSession } from "./hierarchy"
 
 const log = Log.create({ service: "session.directory" })
 
@@ -155,11 +156,13 @@ export function readFinding(sessionID: string, phase: string): string | null {
 export function translateSessionPath(filepath: string, sessionID: string): string {
   if (filepath.startsWith("/session/")) {
     const relativePath = filepath.slice(9) // "/session/".length = 9
-    const sessionDir = get(sessionID)
+    // Use root session ID so sub-agents share the same directory as root
+    const rootSessionID = getRootSession(sessionID)
+    const sessionDir = get(rootSessionID)
 
     // Ensure session directory exists
     if (!existsSync(sessionDir)) {
-      create(sessionID)
+      create(rootSessionID)
     }
 
     return join(sessionDir, relativePath)
