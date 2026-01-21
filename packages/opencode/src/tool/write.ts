@@ -11,6 +11,7 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { trimDiff } from "./edit"
 import { assertExternalDirectory } from "./external-directory"
+import { translateSessionPath } from "../session/directory"
 
 const MAX_DIAGNOSTICS_PER_FILE = 20
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
@@ -22,7 +23,9 @@ export const WriteTool = Tool.define("write", {
     filePath: z.string().describe("The absolute path to the file to write (must be absolute, not relative)"),
   }),
   async execute(params, ctx) {
-    const filepath = path.isAbsolute(params.filePath) ? params.filePath : path.join(Instance.directory, params.filePath)
+    // Translate /session/ paths to actual session directory on host
+    const translatedPath = translateSessionPath(params.filePath, ctx.sessionID)
+    const filepath = path.isAbsolute(translatedPath) ? translatedPath : path.join(Instance.directory, translatedPath)
     await assertExternalDirectory(ctx, filepath)
 
     const file = Bun.file(filepath)

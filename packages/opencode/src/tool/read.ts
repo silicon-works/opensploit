@@ -8,6 +8,7 @@ import DESCRIPTION from "./read.txt"
 import { Instance } from "../project/instance"
 import { Identifier } from "../id/id"
 import { assertExternalDirectory } from "./external-directory"
+import { translateSessionPath } from "../session/directory"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -22,6 +23,10 @@ export const ReadTool = Tool.define("read", {
   }),
   async execute(params, ctx) {
     let filepath = params.filePath
+
+    // Translate /session/ paths to actual session directory on host
+    filepath = translateSessionPath(filepath, ctx.sessionID)
+
     if (!path.isAbsolute(filepath)) {
       filepath = path.join(process.cwd(), filepath)
     }

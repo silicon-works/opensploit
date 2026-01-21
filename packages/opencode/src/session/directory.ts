@@ -137,3 +137,32 @@ export function readFinding(sessionID: string, phase: string): string | null {
   if (!existsSync(path)) return null
   return readFileSync(path, "utf-8")
 }
+
+/**
+ * Translate /session/ paths to actual session directory paths on the host.
+ *
+ * Inside MCP containers, the session directory is mounted at /session/.
+ * Built-in tools (Read, Write, Edit) run on the host where /session/ doesn't exist.
+ * This function translates /session/ paths to the actual host path.
+ *
+ * This allows agents to use /session/ paths consistently for both MCP tools
+ * and built-in tools, simplifying the mental model.
+ *
+ * @param filepath - The file path (may start with /session/)
+ * @param sessionID - The session ID for resolving the actual path
+ * @returns Translated path (or original if not a /session/ path)
+ */
+export function translateSessionPath(filepath: string, sessionID: string): string {
+  if (filepath.startsWith("/session/")) {
+    const relativePath = filepath.slice(9) // "/session/".length = 9
+    const sessionDir = get(sessionID)
+
+    // Ensure session directory exists
+    if (!existsSync(sessionDir)) {
+      create(sessionID)
+    }
+
+    return join(sessionDir, relativePath)
+  }
+  return filepath
+}
