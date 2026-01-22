@@ -304,7 +304,7 @@ export namespace SessionProcessor {
                       ...match,
                       state: {
                         status: "completed",
-                        input: value.input,
+                        input: value.input ?? match.state.input,
                         output: finalOutput,
                         metadata: finalMetadata,
                         title: value.output.title,
@@ -328,7 +328,7 @@ export namespace SessionProcessor {
                       ...match,
                       state: {
                         status: "error",
-                        input: value.input,
+                        input: value.input ?? match.state.input,
                         error: (value.error as any).toString(),
                         time: {
                           start: match.state.time.start,
