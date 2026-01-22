@@ -142,6 +142,17 @@ export namespace ToolRegistry {
     const tools = await all()
     const result = await Promise.all(
       tools
+        .filter((t) => {
+          // Use apply_patch for certain GPT models (codex-style editing)
+          // GPT models except gpt-4 and OSS variants prefer apply_patch over edit/write
+          const usePatch =
+            model.modelID.includes("gpt-") && !model.modelID.includes("oss") && !model.modelID.includes("gpt-4")
+          if (t.id === "apply_patch") return usePatch
+          if (t.id === "edit" || t.id === "write") return !usePatch
+
+          // Note: websearch/codesearch available to all (no Zen restriction for OpenSploit)
+          return true
+        })
         .map(async (t) => {
           using _ = log.time(t.id)
           return {
