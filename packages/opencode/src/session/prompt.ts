@@ -622,12 +622,19 @@ export namespace SessionPrompt {
 
       await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: sessionMessages })
 
+      // Build system prompt - store in user message on first step for training data capture
+      const systemPrompt = [...(await SystemPrompt.environment()), ...(await SystemPrompt.custom())]
+      if (step === 0 && !lastUser.system) {
+        lastUser.system = systemPrompt.join("\n\n")
+        await Session.updateMessage(lastUser)
+      }
+
       const result = await processor.process({
         user: lastUser,
         agent,
         abort,
         sessionID,
-        system: [...(await SystemPrompt.environment()), ...(await SystemPrompt.custom())],
+        system: systemPrompt,
         messages: [
           ...MessageV2.toModelMessages(sessionMessages, model),
           ...(isLastStep

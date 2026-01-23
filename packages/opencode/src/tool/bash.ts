@@ -16,6 +16,9 @@ import { Shell } from "@/shell/shell"
 
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncation"
+import { translateSessionPath } from "../session/directory"
+import { getRootSession } from "../session/hierarchy"
+import * as SessionDirectory from "../session/directory"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -75,12 +78,42 @@ export const BashTool = Tool.define("bash", async () => {
         ),
     }),
     async execute(params, ctx) {
-      const cwd = params.workdir || Instance.directory
+      // Translate /session/ paths to actual session directory on host
+      // This allows agents to use /session/ paths consistently across all tools
+      let command = params.command
+      let workdir = params.workdir
+
+      if (command.includes("/session/") || workdir?.startsWith("/session/")) {
+        const rootSessionID = getRootSession(ctx.sessionID)
+        const sessionDir = SessionDirectory.get(rootSessionID)
+
+        // Ensure session directory exists before translation
+        if (!SessionDirectory.exists(rootSessionID)) {
+          SessionDirectory.create(rootSessionID)
+        }
+
+        // Replace all /session/ occurrences in the command with actual path
+        if (command.includes("/session/")) {
+          command = command.replaceAll("/session/", sessionDir + "/")
+          log.info("translated session paths in command", {
+            original: params.command.slice(0, 100),
+            sessionDir
+          })
+        }
+
+        // Translate workdir if it starts with /session/
+        if (workdir?.startsWith("/session/")) {
+          workdir = translateSessionPath(workdir, ctx.sessionID)
+          log.info("translated session path in workdir", { original: params.workdir, translated: workdir })
+        }
+      }
+
+      const cwd = workdir || Instance.directory
       if (params.timeout !== undefined && params.timeout < 0) {
         throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
       }
       const timeout = params.timeout ?? DEFAULT_TIMEOUT
-      const tree = await parser().then((p) => p.parse(params.command))
+      const tree = await parser().then((p) => p.parse(command))
       if (!tree) {
         throw new Error("Failed to parse command")
       }
@@ -154,7 +187,7 @@ export const BashTool = Tool.define("bash", async () => {
         })
       }
 
-      const proc = spawn(params.command, {
+      const proc = spawn(command, {
         shell,
         cwd,
         env: {

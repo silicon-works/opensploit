@@ -3,6 +3,7 @@ import { BusEvent } from "@/bus/bus-event"
 import { Config } from "@/config/config"
 import { Identifier } from "@/id/id"
 import { Instance } from "@/project/instance"
+import { getRootSession } from "@/session/hierarchy"
 import { Storage } from "@/storage/storage"
 import { fn } from "@/util/fn"
 import { Log } from "@/util/log"
@@ -131,6 +132,14 @@ export namespace PermissionNext {
     async (input) => {
       const s = await state()
       const { ruleset, ...request } = input
+
+      // Route permission to ROOT session for bubbling
+      const rootSessionID = getRootSession(request.sessionID)
+      log.info("permission routing", {
+        sessionID: request.sessionID.slice(-8),
+        rootSessionID: rootSessionID.slice(-8),
+      })
+
       for (const pattern of request.patterns ?? []) {
         const rule = evaluate(request.permission, pattern, ruleset, s.approved)
         log.info("evaluated", { permission: request.permission, pattern, action: rule })
@@ -142,6 +151,7 @@ export namespace PermissionNext {
             const info: Request = {
               id,
               ...request,
+              sessionID: rootSessionID, // Store under ROOT session for bubbling
             }
             s.pending[id] = {
               info,
