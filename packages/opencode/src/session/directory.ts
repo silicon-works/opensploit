@@ -34,6 +34,18 @@ const log = Log.create({ service: "session.directory" })
 const SESSION_DIR_PREFIX = "opensploit-session-"
 
 /**
+ * Permission patterns for external_directory rules.
+ * Used by agent.ts to allow writes to session directories without prompting.
+ * Other external directories still require user approval ("ask").
+ *
+ * These patterns match the session temp directory structure:
+ * - PERMISSION_PATTERN: matches the session directory itself
+ * - PERMISSION_GLOB: matches all files/subdirs within session directories
+ */
+export const PERMISSION_PATTERN = join(tmpdir(), `${SESSION_DIR_PREFIX}*`)
+export const PERMISSION_GLOB = join(tmpdir(), `${SESSION_DIR_PREFIX}*`, "**")
+
+/**
  * Create a temp directory for a session with standard structure.
  * Called on first sub-agent spawn in a pentest session tree.
  */

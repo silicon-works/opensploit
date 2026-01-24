@@ -702,7 +702,7 @@ test("pentest master agent denies security tools in bash", async () => {
   })
 })
 
-test("pentest/recon subagent has read-only permissions", async () => {
+test("pentest/recon subagent has unified permissions matching parent", async () => {
   await using tmp = await tmpdir()
   await Instance.provide({
     directory: tmp.path,
@@ -711,15 +711,16 @@ test("pentest/recon subagent has read-only permissions", async () => {
       expect(recon).toBeDefined()
       expect(recon?.mode).toBe("subagent")
       expect(recon?.color).toBe("#3498db")
-      // Read-only permissions
+      // Unified permissions - all operations allowed
       expect(evalPerm(recon, "read")).toBe("allow")
       expect(evalPerm(recon, "glob")).toBe("allow")
       expect(evalPerm(recon, "grep")).toBe("allow")
       expect(evalPerm(recon, "task")).toBe("allow")
       expect(evalPerm(recon, "tool_registry_search")).toBe("allow")
-      // Write operations denied
-      expect(evalPerm(recon, "edit")).toBe("deny")
-      expect(evalPerm(recon, "write")).toBe("deny")
+      expect(evalPerm(recon, "edit")).toBe("allow")
+      expect(evalPerm(recon, "write")).toBe("allow")
+      // Security tools in bash are denied (forces MCP usage)
+      expect(PermissionNext.evaluate("bash", "nmap -sV 10.10.10.1", recon!.permission).action).toBe("deny")
     },
   })
 })
@@ -765,7 +766,7 @@ test("pentest/report subagent has write but no bash", async () => {
   })
 })
 
-test("pentest/research subagent has web access but no write", async () => {
+test("pentest/research subagent has unified permissions with web access", async () => {
   await using tmp = await tmpdir()
   await Instance.provide({
     directory: tmp.path,
@@ -778,11 +779,12 @@ test("pentest/research subagent has web access but no write", async () => {
       expect(evalPerm(research, "webfetch")).toBe("allow")
       expect(evalPerm(research, "websearch")).toBe("allow")
       expect(evalPerm(research, "tool_registry_search")).toBe("allow")
-      // Read-only
+      // Unified permissions - all operations allowed
       expect(evalPerm(research, "read")).toBe("allow")
-      expect(evalPerm(research, "edit")).toBe("deny")
-      expect(evalPerm(research, "write")).toBe("deny")
-      expect(evalPerm(research, "bash")).toBe("deny")
+      expect(evalPerm(research, "edit")).toBe("allow")
+      expect(evalPerm(research, "write")).toBe("allow")
+      // Security tools in bash are denied (forces MCP usage)
+      expect(PermissionNext.evaluate("bash", "curl http://target.com", research!.permission).action).toBe("deny")
     },
   })
 })

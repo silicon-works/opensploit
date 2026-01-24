@@ -3,6 +3,7 @@ import z from "zod"
 import { Provider } from "../provider/provider"
 import { generateObject, streamObject, type ModelMessage } from "ai"
 import { SystemPrompt } from "../session/system"
+import * as SessionDirectory from "../session/directory"
 import { Instance } from "../project/instance"
 import { Truncate } from "../tool/truncation"
 import { Auth } from "../auth"
@@ -76,6 +77,42 @@ export namespace Agent {
       },
     })
     const user = PermissionNext.fromConfig(cfg.permission ?? {})
+
+    // Bash security tool denials - forces MCP usage (REQ-ARC-011-A)
+    const bashSecurityDenials: Record<string, "allow" | "ask" | "deny"> = {
+      "*": "allow",
+      "nmap*": "deny",
+      "ssh *": "deny",
+      "scp *": "deny",
+      "sqlmap*": "deny",
+      "hydra*": "deny",
+      "nikto*": "deny",
+      "gobuster*": "deny",
+      "ffuf*": "deny",
+      "curl *": "deny",
+      "wget *": "deny",
+      "nc *": "deny",
+      "netcat*": "deny",
+      "metasploit*": "deny",
+      "msfconsole*": "deny",
+      "john*": "deny",
+      "hashcat*": "deny",
+    }
+
+    // External directory config - session dir allowed, others ask
+    const pentestExternalDir: Record<string, "allow" | "ask" | "deny"> = {
+      "*": "ask",
+      [SessionDirectory.PERMISSION_PATTERN]: "allow",
+      [SessionDirectory.PERMISSION_GLOB]: "allow",
+    }
+
+    // Shared permission for all pentest agents (except report which has no bash)
+    const pentestPermission = PermissionNext.fromConfig({
+      "*": "allow",
+      doom_loop: "ask",
+      external_directory: pentestExternalDir,
+      bash: bashSecurityDenials,
+    })
 
     const result: Record<string, Info> = {
       build: {
@@ -215,32 +252,10 @@ export namespace Agent {
         temperature: 0.3,
         permission: PermissionNext.merge(
           defaults,
+          pentestPermission,
           PermissionNext.fromConfig({
-            "*": "allow",
-            doom_loop: "ask",
-            external_directory: { "*": "ask" },
             question: "allow",
             plan_enter: "allow",
-            // DENY security tools in bash - forces MCP usage (REQ-ARC-011-A)
-            bash: {
-              "*": "allow",
-              "nmap*": "deny",
-              "ssh *": "deny",
-              "scp *": "deny",
-              "sqlmap*": "deny",
-              "hydra*": "deny",
-              "nikto*": "deny",
-              "gobuster*": "deny",
-              "ffuf*": "deny",
-              "curl *": "deny",
-              "wget *": "deny",
-              "nc *": "deny",
-              "netcat*": "deny",
-              "metasploit*": "deny",
-              "msfconsole*": "deny",
-              "john*": "deny",
-              "hashcat*": "deny",
-            },
           }),
           user,
         ),
@@ -253,33 +268,7 @@ export namespace Agent {
         color: "#3498db",
         description: "Reconnaissance phase - discover services and gather information",
         prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_RECON,
-        permission: PermissionNext.merge(
-          defaults,
-          PermissionNext.fromConfig({
-            "*": "deny",
-            read: "allow",
-            write: "allow", // For findings files
-            edit: "allow", // For findings files
-            glob: "allow",
-            grep: "allow",
-            task: "allow",
-            tool_registry_search: "allow",
-            mcp_tool: "allow",
-            update_engagement_state: "allow",
-            read_tool_output: "allow",
-            hosts: "allow",
-            todowrite: "allow",
-            todoread: "allow",
-            bash: {
-              "*": "deny",
-              "cat *": "allow",
-              "ls *": "allow",
-              "head *": "allow",
-              "tail *": "allow",
-            },
-          }),
-          user,
-        ),
+        permission: PermissionNext.merge(defaults, pentestPermission, user),
         options: {},
       },
       "pentest/enum": {
@@ -289,33 +278,7 @@ export namespace Agent {
         color: "#9b59b6",
         description: "Enumeration phase - detailed service analysis and vulnerability identification",
         prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_ENUM,
-        permission: PermissionNext.merge(
-          defaults,
-          PermissionNext.fromConfig({
-            "*": "deny",
-            read: "allow",
-            write: "allow", // For findings files
-            edit: "allow", // For findings files
-            glob: "allow",
-            grep: "allow",
-            task: "allow",
-            tool_registry_search: "allow",
-            mcp_tool: "allow",
-            update_engagement_state: "allow",
-            read_tool_output: "allow",
-            hosts: "allow",
-            todowrite: "allow",
-            todoread: "allow",
-            bash: {
-              "*": "deny",
-              "cat *": "allow",
-              "ls *": "allow",
-              "head *": "allow",
-              "tail *": "allow",
-            },
-          }),
-          user,
-        ),
+        permission: PermissionNext.merge(defaults, pentestPermission, user),
         options: {},
       },
       "pentest/exploit": {
@@ -325,35 +288,7 @@ export namespace Agent {
         color: "#e74c3c",
         description: "Exploitation phase - attempt to gain access using discovered vulnerabilities",
         prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_EXPLOIT,
-        permission: PermissionNext.merge(
-          defaults,
-          PermissionNext.fromConfig({
-            "*": "allow",
-            doom_loop: "ask",
-            external_directory: { "*": "ask" },
-            // DENY security tools in bash - forces MCP usage
-            bash: {
-              "*": "allow",
-              "nmap*": "deny",
-              "ssh *": "deny",
-              "scp *": "deny",
-              "sqlmap*": "deny",
-              "hydra*": "deny",
-              "nikto*": "deny",
-              "gobuster*": "deny",
-              "ffuf*": "deny",
-              "curl *": "deny",
-              "wget *": "deny",
-              "nc *": "deny",
-              "netcat*": "deny",
-              "metasploit*": "deny",
-              "msfconsole*": "deny",
-              "john*": "deny",
-              "hashcat*": "deny",
-            },
-          }),
-          user,
-        ),
+        permission: PermissionNext.merge(defaults, pentestPermission, user),
         options: {},
       },
       "pentest/post": {
@@ -363,35 +298,7 @@ export namespace Agent {
         color: "#f39c12",
         description: "Post-exploitation phase - privilege escalation, lateral movement, persistence",
         prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_POST,
-        permission: PermissionNext.merge(
-          defaults,
-          PermissionNext.fromConfig({
-            "*": "allow",
-            doom_loop: "ask",
-            external_directory: { "*": "ask" },
-            // DENY security tools in bash - forces MCP usage
-            bash: {
-              "*": "allow",
-              "nmap*": "deny",
-              "ssh *": "deny",
-              "scp *": "deny",
-              "sqlmap*": "deny",
-              "hydra*": "deny",
-              "nikto*": "deny",
-              "gobuster*": "deny",
-              "ffuf*": "deny",
-              "curl *": "deny",
-              "wget *": "deny",
-              "nc *": "deny",
-              "netcat*": "deny",
-              "metasploit*": "deny",
-              "msfconsole*": "deny",
-              "john*": "deny",
-              "hashcat*": "deny",
-            },
-          }),
-          user,
-        ),
+        permission: PermissionNext.merge(defaults, pentestPermission, user),
         options: {},
       },
       "pentest/report": {
@@ -401,18 +308,14 @@ export namespace Agent {
         color: "#27ae60",
         description: "Reporting phase - aggregate findings and generate comprehensive reports",
         prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_REPORT,
+        // Report agent: no bash needed, just reads findings and writes reports
         permission: PermissionNext.merge(
           defaults,
           PermissionNext.fromConfig({
-            "*": "deny",
-            read: "allow",
-            write: "allow",
-            edit: "allow",
-            glob: "allow",
-            grep: "allow",
-            tool_registry_search: "allow",
-            read_tool_output: "allow",
-            read_engagement_state: "allow",
+            "*": "allow",
+            doom_loop: "ask",
+            external_directory: pentestExternalDir,
+            bash: { "*": "deny" },
           }),
           user,
         ),
@@ -425,25 +328,7 @@ export namespace Agent {
         color: "#1abc9c",
         description: "OSINT and research specialist - CVE details, exploit research, default credentials",
         prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_RESEARCH,
-        permission: PermissionNext.merge(
-          defaults,
-          PermissionNext.fromConfig({
-            "*": "deny",
-            read: "allow",
-            write: "allow", // For findings files
-            edit: "allow", // For findings files
-            glob: "allow",
-            grep: "allow",
-            webfetch: "allow",
-            websearch: "allow",
-            task: "allow",
-            tool_registry_search: "allow",
-            mcp_tool: "allow",
-            read_engagement_state: "allow",
-            read_tool_output: "allow",
-          }),
-          user,
-        ),
+        permission: PermissionNext.merge(defaults, pentestPermission, user),
         options: {},
       },
     }
