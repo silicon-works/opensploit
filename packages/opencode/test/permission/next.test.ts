@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test"
 import os from "os"
+import { Permission } from "../../src/permission"
 import { PermissionNext } from "../../src/permission/next"
 import { Instance } from "../../src/project/instance"
 import { Storage } from "../../src/storage/storage"
@@ -490,6 +491,25 @@ test("ask - throws RejectedError when action is deny", async () => {
           ruleset: [{ permission: "bash", pattern: "*", action: "deny" }],
         }),
       ).rejects.toBeInstanceOf(PermissionNext.DeniedError)
+    },
+  })
+})
+
+test("ask - ultrasploit auto-approves even when ruleset denies", async () => {
+  await using tmp = await tmpdir({ git: true })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      Permission.enableUltrasploit("session_test")
+      const result = await PermissionNext.ask({
+        sessionID: "session_test",
+        permission: "bash",
+        patterns: ["rm -rf /"],
+        metadata: {},
+        always: [],
+        ruleset: [{ permission: "bash", pattern: "*", action: "deny" }],
+      })
+      expect(result).toBeUndefined()
     },
   })
 })

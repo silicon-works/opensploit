@@ -2,6 +2,7 @@ import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
 import { Config } from "@/config/config"
 import { Identifier } from "@/id/id"
+import { Permission } from "@/permission"
 import { Instance } from "@/project/instance"
 import { getRootSession } from "@/session/hierarchy"
 import { Storage } from "@/storage/storage"
@@ -139,6 +140,14 @@ export namespace PermissionNext {
         sessionID: request.sessionID.slice(-8),
         rootSessionID: rootSessionID.slice(-8),
       })
+
+      if (Permission.isUltrasploit(rootSessionID)) {
+        log.info("ultrasploit auto-approved", {
+          permission: request.permission,
+          rootSessionID: rootSessionID.slice(-8),
+        })
+        return
+      }
 
       for (const pattern of request.patterns ?? []) {
         const rule = evaluate(request.permission, pattern, ruleset, s.approved)

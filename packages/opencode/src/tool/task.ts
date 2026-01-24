@@ -1,6 +1,7 @@
 import { Tool } from "./tool"
 import DESCRIPTION from "./task.txt"
 import z from "zod"
+import path from "path"
 import { Session } from "../session"
 import { Bus } from "../bus"
 import { MessageV2 } from "../session/message-v2"
@@ -94,6 +95,11 @@ export const TaskTool = Tool.define("task", async (ctx) => {
 
       // Find root session for hierarchy tracking and state sharing
       const rootSessionID = await getRootSessionID(ctx.sessionID)
+      const sessionDirRule = {
+        permission: "external_directory",
+        pattern: path.join(SessionDirectory.get(rootSessionID), "*"),
+        action: "ask" as const,
+      }
 
       const session = await iife(async () => {
         if (params.session_id) {
@@ -122,6 +128,7 @@ export const TaskTool = Tool.define("task", async (ctx) => {
               pattern: "*" as const,
               action: "deny" as const,
             },
+            sessionDirRule,
             ...(config.experimental?.primary_tools?.map((t) => ({
               pattern: "*",
               action: "allow" as const,
@@ -130,6 +137,16 @@ export const TaskTool = Tool.define("task", async (ctx) => {
           ],
         })
       })
+
+      if (
+        !session.permission?.some(
+          (rule) => rule.permission === sessionDirRule.permission && rule.pattern === sessionDirRule.pattern,
+        )
+      ) {
+        await Session.update(session.id, (draft) => {
+          draft.permission = [...(draft.permission ?? []), sessionDirRule]
+        })
+      }
 
       // Register hierarchy for permission bubbling (Feature 04)
       registerRootSession(session.id, rootSessionID)
