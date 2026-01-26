@@ -28,11 +28,11 @@ type Phase = (typeof VALID_PHASES)[number]
 // =============================================================================
 
 const ParamDefSchema = z.object({
-  type: z.string(),
+  type: z.union([z.string(), z.array(z.string())]),
   required: z.boolean().optional(),
   default: z.any().optional(),
   description: z.string().optional(),
-  enum: z.array(z.string()).optional(),
+  enum: z.array(z.union([z.string(), z.number()])).optional(),
   values: z.array(z.string()).optional(),
 })
 
