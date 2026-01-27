@@ -965,6 +965,7 @@ export namespace Config {
           "pentest/post": Agent.optional(),
           "pentest/report": Agent.optional(),
           "pentest/research": Agent.optional(),
+          "pentest/build": Agent.optional(),
         })
         .catchall(Agent)
         .optional()

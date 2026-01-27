@@ -22,6 +22,7 @@ import PROMPT_PENTEST_EXPLOIT from "./prompt/pentest/exploit.txt"
 import PROMPT_PENTEST_POST from "./prompt/pentest/post.txt"
 import PROMPT_PENTEST_REPORT from "./prompt/pentest/report.txt"
 import PROMPT_PENTEST_RESEARCH from "./prompt/pentest/research.txt"
+import PROMPT_PENTEST_BUILD from "./prompt/pentest/build.txt"
 import { PermissionNext } from "@/permission/next"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@/global"
@@ -328,6 +329,16 @@ export namespace Agent {
         color: "#1abc9c",
         description: "OSINT and research specialist - CVE details, exploit research, default credentials",
         prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_RESEARCH,
+        permission: PermissionNext.merge(defaults, pentestPermission, user),
+        options: {},
+      },
+      "pentest/build": {
+        name: "pentest/build",
+        mode: "subagent",
+        native: true,
+        color: "#e67e22",
+        description: "Exploit and payload builder - finds or creates tested exploits",
+        prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_BUILD,
         permission: PermissionNext.merge(defaults, pentestPermission, user),
         options: {},
       },
