@@ -12,6 +12,13 @@ import path from "path"
 import os from "os"
 import fs from "fs/promises"
 import yaml from "js-yaml"
+import {
+  recordExperience,
+  getToolContext,
+  setCurrentPhase,
+  type ToolResult as ExperienceToolResult,
+  type ToolParams as ExperienceToolParams,
+} from "../memory"
 
 const log = Log.create({ service: "tool.mcp" })
 
@@ -262,6 +269,12 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
         phaseWarning = phaseCheck.warning + "\n\n"
       }
 
+      // Update ToolContext with current phase (Doc 22 §Agent Loop Integration)
+      const toolPhase = PhaseGating.getToolPhase(toolName)
+      if (toolPhase) {
+        setCurrentPhase(sessionId, toolPhase)
+      }
+
       // Ask permission to run the MCP tool
       try {
         await Permission.ask({
@@ -406,6 +419,25 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
         output = `${warnings}# ${toolName}.${method} Result\n\n${storeResult.output}`
       }
 
+      // Record experience for learning (Doc 22 §Part 2)
+      // This captures successful tool executions for pattern learning
+      try {
+        const experienceParams: ExperienceToolParams = {
+          tool: toolName,
+          method,
+          args: args as Record<string, unknown>,
+        }
+        const experienceOutput: ExperienceToolResult = {
+          output: rawOutput,
+          ...(typeof result === "object" && result !== null ? (result as Record<string, unknown>) : {}),
+        }
+        const toolContext = getToolContext(sessionId)
+        await recordExperience(sessionId, experienceParams, experienceOutput, toolContext)
+      } catch (expError) {
+        // Don't fail tool execution if experience recording fails
+        log.warn("failed to record experience", { toolName, method, error: String(expError) })
+      }
+
       return {
         output,
         title: `${toolName}.${method}${storeResult.stored ? " (output stored)" : ""}`,
@@ -414,6 +446,24 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       log.error("mcp tool invocation failed", { toolName, method, error: errorMessage })
+
+      // Record failed experience for learning (Doc 22 §Part 2)
+      // Failures are important for learning recovery patterns
+      try {
+        const experienceParams: ExperienceToolParams = {
+          tool: toolName,
+          method,
+          args: args as Record<string, unknown>,
+        }
+        const experienceOutput: ExperienceToolResult = {
+          error: errorMessage,
+        }
+        const toolContext = getToolContext(sessionId)
+        await recordExperience(sessionId, experienceParams, experienceOutput, toolContext)
+      } catch (expError) {
+        // Don't fail tool execution if experience recording fails
+        log.warn("failed to record failed experience", { toolName, method, error: String(expError) })
+      }
 
       return {
         output: `Failed to invoke ${toolName}.${method}:\n\n${errorMessage}`,

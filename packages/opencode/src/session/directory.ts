@@ -28,6 +28,8 @@ import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from "fs"
 import { join } from "path"
 import { Log } from "../util/log"
 import { getRootSession } from "./hierarchy"
+import { Bus } from "../bus"
+import { Session } from "."
 
 const log = Log.create({ service: "session.directory" })
 
@@ -46,8 +48,25 @@ export const PERMISSION_PATTERN = join(tmpdir(), `${SESSION_DIR_PREFIX}*`)
 export const PERMISSION_GLOB = join(tmpdir(), `${SESSION_DIR_PREFIX}*`, "**")
 
 /**
+ * Initialize session directory auto-creation.
+ * Creates working directory when a root (parent) session is created.
+ * Sub-agents share the root session's directory.
+ */
+export function init(): void {
+  Bus.subscribe(Session.Event.Created, async (event) => {
+    const { info } = event.properties
+    // Only create for root sessions (no parentID)
+    if (!info.parentID) {
+      create(info.id)
+    }
+  })
+  log.info("session_directory_init")
+}
+
+/**
  * Create a temp directory for a session with standard structure.
- * Called on first sub-agent spawn in a pentest session tree.
+ * Automatically called for root sessions via init(). Also called lazily
+ * by tools as a fallback when the directory doesn't exist yet.
  */
 export function create(sessionID: string): string {
   const dir = join(tmpdir(), `${SESSION_DIR_PREFIX}${sessionID}`)

@@ -2,6 +2,7 @@ import z from "zod"
 import { Tool } from "./tool"
 import { Log } from "../util/log"
 import { spawn } from "bun"
+import { getRootSession } from "../session/hierarchy"
 
 const log = Log.create({ service: "tool.hosts" })
 
@@ -192,7 +193,8 @@ export const HostsTool = Tool.define("hosts", {
   }),
   async execute(params, ctx): Promise<{ output: string; title: string; metadata: { success: boolean; entries?: HostEntry[] } }> {
     const { action, entries } = params
-    const sessionId = ctx.sessionID
+    // Use root session ID so all agents share the same host entries and cleanup works
+    const sessionId = getRootSession(ctx.sessionID)
 
     switch (action) {
       case "add": {

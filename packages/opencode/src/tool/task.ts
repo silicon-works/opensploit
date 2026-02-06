@@ -221,10 +221,10 @@ export const TaskTool = Tool.define("task", async (ctx) => {
       const shouldInjectContext = isPentest || engagementState !== null
 
       if (shouldInjectContext) {
-        // Ensure session directory exists (created on first sub-agent spawn)
+        // Ensure session directory exists (normally created at parent session start, fallback here)
         if (!SessionDirectory.exists(rootSessionID)) {
           SessionDirectory.create(rootSessionID)
-          log.info("created session directory", { rootSessionID: rootSessionID.slice(-8) })
+          log.info("created session directory (fallback)", { rootSessionID: rootSessionID.slice(-8) })
         }
         const sessionDir = SessionDirectory.get(rootSessionID)
 

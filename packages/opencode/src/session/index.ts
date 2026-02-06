@@ -24,6 +24,7 @@ import { PermissionNext } from "@/permission/next"
 import { unregisterTree } from "./hierarchy"
 import * as SessionDirectory from "./directory"
 import * as OutputStore from "@/tool/output-store"
+import { persistWorkingDirToArchive } from "@/training/training-data"
 import { Global } from "@/global"
 
 export namespace Session {
@@ -345,13 +346,16 @@ export namespace Session {
       }
       await unshare(sessionID).catch(() => {})
 
-      // Feature 04: Clean up hierarchy tracking and temp directory
-      // Feature 05: Clean up output store files
-      // Only clean up temp directory for root sessions (sessions without parentID)
+      // For root sessions: persist working dir state to archive, then clean up
       if (!session.parentID) {
+        // Persist engagement state from /tmp/ to ~/.opensploit/sessions/ before cleanup
+        persistWorkingDirToArchive(sessionID)
+
+        // Clean up hierarchy tracking and temp directory
         unregisterTree(sessionID)
         SessionDirectory.cleanup(sessionID)
-        OutputStore.cleanupSession(sessionID)
+        // Note: OutputStore files in sessions/{id}/outputs/ are NOT cleaned up here.
+        // They persist in the archive for training/observer validation.
       }
 
       for (const msg of await Storage.list(["message", sessionID])) {

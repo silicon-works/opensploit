@@ -23,6 +23,8 @@ import { WebSearchTool } from "./websearch"
 import { CodeSearchTool } from "./codesearch"
 import { ToolRegistrySearchTool } from "./tool-registry-search"
 import { UpdateEngagementStateTool, ReadEngagementStateTool } from "./engagement-state"
+import { PatternSearchTool } from "./pattern-search"
+import { SavePatternTool } from "./save-pattern"
 import { ReadToolOutputTool } from "./read-tool-output"
 import { HostsTool } from "./hosts"
 import { McpToolInvoke } from "./mcp-tool"
@@ -117,6 +119,8 @@ export namespace ToolRegistry {
       McpToolInvoke,
       UpdateEngagementStateTool,
       ReadEngagementStateTool,
+      PatternSearchTool,
+      SavePatternTool,
       ReadToolOutputTool,
       HostsTool,
       SkillTool,

@@ -70,6 +70,8 @@ export namespace Trajectory {
       success: boolean
     }
     durationMs?: number
+    /** Agent that performed this step (master or sub-agent name) */
+    agentName?: string
   }
 
   /**
@@ -290,6 +292,110 @@ export namespace Trajectory {
       endTime: endTime ? new Date(endTime).toISOString() : undefined,
       trajectory: steps,
     }
+  }
+
+  /**
+   * Extract trajectory from a session tree (root + all child sessions).
+   * Used by pattern capture to include sub-agent data.
+   *
+   * This aggregates TVAR steps from:
+   * - The root session (master agent)
+   * - All child sessions recursively (sub-agents)
+   *
+   * Steps are sorted by timestamp and re-numbered sequentially.
+   */
+  export async function fromSessionTree(rootSessionID: string): Promise<Data | null> {
+    // Get root trajectory
+    const rootTrajectory = await fromSession(rootSessionID)
+    if (!rootTrajectory) return null
+
+    // Tag root steps with agent name
+    for (const step of rootTrajectory.trajectory) {
+      step.agentName = "master"
+    }
+
+    // Collect all steps (will merge children's steps)
+    const allSteps: Step[] = [...rootTrajectory.trajectory]
+    let earliestStart = new Date(rootTrajectory.startTime).getTime()
+    let latestEnd = rootTrajectory.endTime ? new Date(rootTrajectory.endTime).getTime() : undefined
+
+    // Get all child sessions recursively
+    const children = await getChildSessionsRecursiveForTree(rootSessionID)
+
+    for (const child of children) {
+      const childTrajectory = await fromSession(child.id)
+      if (childTrajectory && childTrajectory.trajectory.length > 0) {
+        // Extract agent name from child session title
+        const agentName = extractAgentNameFromTitle(child.title)
+
+        // Tag child steps with agent name and add to collection
+        for (const step of childTrajectory.trajectory) {
+          step.agentName = agentName
+          allSteps.push(step)
+        }
+
+        // Update time bounds
+        const childStart = new Date(childTrajectory.startTime).getTime()
+        if (childStart < earliestStart) {
+          earliestStart = childStart
+        }
+        if (childTrajectory.endTime) {
+          const childEnd = new Date(childTrajectory.endTime).getTime()
+          if (!latestEnd || childEnd > latestEnd) {
+            latestEnd = childEnd
+          }
+        }
+      }
+    }
+
+    // Sort all steps by timestamp
+    allSteps.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+
+    // Re-number steps sequentially
+    allSteps.forEach((step, index) => {
+      step.step = index + 1
+    })
+
+    return {
+      sessionID: rootSessionID,
+      model: rootTrajectory.model,
+      startTime: new Date(earliestStart).toISOString(),
+      endTime: latestEnd ? new Date(latestEnd).toISOString() : undefined,
+      trajectory: allSteps,
+    }
+  }
+
+  /**
+   * Helper: Get all child sessions recursively (for fromSessionTree)
+   */
+  async function getChildSessionsRecursiveForTree(sessionID: string): Promise<Session.Info[]> {
+    const children = await Session.children(sessionID)
+    const all: Session.Info[] = [...children]
+    for (const child of children) {
+      const grandchildren = await getChildSessionsRecursiveForTree(child.id)
+      all.push(...grandchildren)
+    }
+    return all
+  }
+
+  /**
+   * Helper: Extract agent name from session title
+   * Patterns: "@pentest/recon subagent", "pentest/enum subagent", etc.
+   */
+  function extractAgentNameFromTitle(title: string): string {
+    // Match pattern: @agentType subagent or (agentType subagent)
+    const atMatch = title.match(/@([^\s)]+)\s+subagent/i)
+    if (atMatch) return atMatch[1]
+
+    // Match pattern: pentest/xxx
+    const pentestMatch = title.match(/\(([^)]+)\s+subagent\)/i)
+    if (pentestMatch) return pentestMatch[1]
+
+    // Match pattern in parentheses
+    const parenMatch = title.match(/pentest\/(\w+)/i)
+    if (parenMatch) return parenMatch[1]
+
+    return "subagent"
   }
 
   /**

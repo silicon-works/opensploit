@@ -24,6 +24,7 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync, readdirSync, statSy
 import { randomBytes } from "crypto"
 import { Log } from "../util/log"
 import { normalize, type OutputRecord } from "./output-normalizers"
+import { getSessionOutputsDir, SESSIONS_DIR } from "@/training/training-data"
 
 const log = Log.create({ service: "output-store" })
 
@@ -41,7 +42,8 @@ function generateOutputId(): string {
 const STORE_THRESHOLD = 5000 // chars - store outputs larger than this
 const QUERY_LIMIT_DEFAULT = 50 // max records returned per query
 const RETENTION_MS = 24 * 60 * 60 * 1000 // 24 hours
-const OUTPUTS_DIR = path.join(os.homedir(), ".opensploit", "outputs")
+// Outputs are stored in the session archive directory
+// ~/.opensploit/sessions/{sessionID}/outputs/
 
 /**
  * Stored output format.
@@ -214,9 +216,10 @@ function formatDirectOutput(data: any, rawOutput: string): string {
 
 /**
  * Get output directory for a session.
+ * Uses the session archive: ~/.opensploit/sessions/{sessionID}/outputs/
  */
 function getSessionDir(sessionId: string): string {
-  return path.join(OUTPUTS_DIR, sessionId)
+  return getSessionOutputsDir(sessionId)
 }
 
 /**
@@ -440,15 +443,17 @@ export async function cleanup(): Promise<{ deleted: number }> {
   let deleted = 0
   const cutoff = Date.now() - RETENTION_MS
 
-  if (!existsSync(OUTPUTS_DIR)) {
+  if (!existsSync(SESSIONS_DIR)) {
     return { deleted: 0 }
   }
 
   try {
-    // Iterate through session directories
-    const sessions = readdirSync(OUTPUTS_DIR)
+    // Iterate through session directories in training folder
+    const sessions = readdirSync(SESSIONS_DIR)
     for (const sessionId of sessions) {
-      const sessionDir = path.join(OUTPUTS_DIR, sessionId)
+      const sessionDir = getSessionOutputsDir(sessionId)
+
+      if (!existsSync(sessionDir)) continue
 
       if (!statSync(sessionDir).isDirectory()) continue
 

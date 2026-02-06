@@ -5,6 +5,8 @@ import fs from "fs/promises"
 import yaml from "js-yaml"
 import { Log } from "../util/log"
 import * as SessionDirectory from "../session/directory"
+import { getRootSession } from "../session/hierarchy"
+import { checkAutoCapturePattern } from "../pattern/capture"
 
 const log = Log.create({ service: "tool.engagement-state" })
 
@@ -23,6 +25,7 @@ const log = Log.create({ service: "tool.engagement-state" })
 
 // Storage paths - directly in session directory per Feature 04 spec
 const STATE_FILE = "state.yaml"
+const STATE_HISTORY_FILE = "state_history.yaml"
 const FINDINGS_DIR = "findings"
 
 // -----------------------------------------------------------------------------
@@ -103,7 +106,26 @@ const EngagementStateSchema = z.object({
   flags: z.array(z.string()).optional(),
 }).passthrough()
 
-type EngagementState = z.infer<typeof EngagementStateSchema>
+export type EngagementState = z.infer<typeof EngagementStateSchema>
+
+// -----------------------------------------------------------------------------
+// State Snapshot Types (Phase 0 - Doc 13 Pattern Learning)
+// -----------------------------------------------------------------------------
+// Historical state tracking for pivotal step detection.
+// Each state change is recorded to enable before/after comparisons.
+
+/**
+ * A point-in-time snapshot of engagement state.
+ * Used by pattern learning (Doc 13) for pivotal step detection.
+ */
+export interface StateSnapshot {
+  /** Unix timestamp when snapshot was taken */
+  timestamp: number
+  /** Step index (auto-incremented, correlates to state change sequence) */
+  stepIndex: number
+  /** The engagement state at this point */
+  state: EngagementState
+}
 
 // -----------------------------------------------------------------------------
 // File System Helpers
@@ -117,6 +139,10 @@ function getSessionDir(sessionID: string): string {
 
 function getStatePath(sessionID: string): string {
   return SessionDirectory.statePath(sessionID)
+}
+
+function getStateHistoryPath(sessionID: string): string {
+  return path.join(getSessionDir(sessionID), STATE_HISTORY_FILE)
 }
 
 async function ensureSessionDir(sessionID: string): Promise<string> {
@@ -165,6 +191,151 @@ async function saveEngagementState(sessionID: string, state: EngagementState): P
   })
   await fs.writeFile(statePath, content, "utf-8")
   log.info("Saved engagement state", { sessionID: sessionID.slice(-8), path: statePath })
+
+  // Append to state history for pattern learning (Doc 13)
+  await appendStateHistory(sessionID, state)
+}
+
+// -----------------------------------------------------------------------------
+// State History Management (Doc 13 - Pattern Learning)
+// -----------------------------------------------------------------------------
+// Append-only history of state changes for pivotal step detection.
+
+/**
+ * Append current state to history file.
+ * Called automatically by saveEngagementState().
+ */
+async function appendStateHistory(sessionID: string, state: EngagementState): Promise<void> {
+  const historyPath = getStateHistoryPath(sessionID)
+
+  // Load existing history or start fresh
+  let history: StateSnapshot[] = []
+  try {
+    const content = await fs.readFile(historyPath, "utf-8")
+    const parsed = yaml.load(content)
+    if (Array.isArray(parsed)) {
+      history = parsed as StateSnapshot[]
+    }
+  } catch (error: any) {
+    if (error.code !== "ENOENT") {
+      log.error("Failed to load state history", { error: error.message })
+    }
+    // File doesn't exist yet - start with empty array
+  }
+
+  // Create new snapshot
+  const snapshot: StateSnapshot = {
+    timestamp: Date.now(),
+    stepIndex: history.length, // Auto-increment based on history size
+    state,
+  }
+
+  // Append and save
+  history.push(snapshot)
+  const content = yaml.dump(history, {
+    indent: 2,
+    lineWidth: 120,
+    noRefs: true,
+    sortKeys: false,
+  })
+  await fs.writeFile(historyPath, content, "utf-8")
+  log.debug("Appended state snapshot", { sessionID: sessionID.slice(-8), stepIndex: snapshot.stepIndex })
+}
+
+/**
+ * Get all state snapshots for a session.
+ * Used by pattern learning (Doc 13) for pivotal step detection.
+ *
+ * @returns Chronological array of state snapshots, or empty array if no history
+ */
+export async function getStateSnapshots(sessionID: string): Promise<StateSnapshot[]> {
+  const historyPath = getStateHistoryPath(sessionID)
+
+  try {
+    const content = await fs.readFile(historyPath, "utf-8")
+    const parsed = yaml.load(content)
+    if (Array.isArray(parsed)) {
+      return parsed as StateSnapshot[]
+    }
+    return []
+  } catch (error: any) {
+    if (error.code === "ENOENT") {
+      return [] // No history yet
+    }
+    log.error("Failed to load state snapshots", { error: error.message })
+    return []
+  }
+}
+
+/**
+ * Get the state snapshot at or before a given step index.
+ * Used for before/after comparisons in pivotal step detection.
+ *
+ * @param snapshots - Array of state snapshots
+ * @param stepIndex - The step index to find
+ * @returns The snapshot at or before stepIndex, or undefined if none found
+ */
+export function getStateAtStep(
+  snapshots: StateSnapshot[],
+  stepIndex: number
+): StateSnapshot | undefined {
+  // Find snapshot at or before stepIndex
+  const candidates = snapshots.filter(s => s.stepIndex <= stepIndex)
+  if (candidates.length === 0) return undefined
+
+  // Return the one closest to stepIndex (highest stepIndex <= target)
+  return candidates.sort((a, b) => b.stepIndex - a.stepIndex)[0]
+}
+
+/**
+ * Detect if a significant state change occurred between two snapshots.
+ * Used by pattern learning to identify pivotal steps.
+ *
+ * @returns Object describing detected changes
+ */
+export function detectStateChanges(
+  before: StateSnapshot | undefined,
+  after: StateSnapshot
+): {
+  accessLevelChanged: boolean
+  credentialsAdded: number
+  vulnerabilitiesAdded: number
+  sessionsAdded: number
+  flagsAdded: number
+  fromAccess?: string
+  toAccess?: string
+} {
+  const beforeState = before?.state ?? {}
+  const afterState = after.state
+
+  const beforeCredCount = beforeState.credentials?.length ?? 0
+  const afterCredCount = afterState.credentials?.length ?? 0
+
+  const beforeVulnCount = beforeState.vulnerabilities?.length ?? 0
+  const afterVulnCount = afterState.vulnerabilities?.length ?? 0
+
+  const beforeSessionCount = beforeState.sessions?.length ?? 0
+  const afterSessionCount = afterState.sessions?.length ?? 0
+
+  const beforeFlagCount = beforeState.flags?.length ?? 0
+  const afterFlagCount = afterState.flags?.length ?? 0
+
+  // Normalize access levels: treat undefined as "none"
+  const beforeAccess = beforeState.accessLevel ?? "none"
+  const afterAccess = afterState.accessLevel ?? "none"
+  const accessChanged = beforeAccess !== afterAccess
+
+  return {
+    accessLevelChanged: accessChanged,
+    credentialsAdded: Math.max(0, afterCredCount - beforeCredCount),
+    vulnerabilitiesAdded: Math.max(0, afterVulnCount - beforeVulnCount),
+    sessionsAdded: Math.max(0, afterSessionCount - beforeSessionCount),
+    flagsAdded: Math.max(0, afterFlagCount - beforeFlagCount),
+    ...(accessChanged ? {
+      fromAccess: beforeAccess,
+      toAccess: afterAccess,
+    } : {}),
+  }
 }
 
 /**
@@ -323,18 +494,36 @@ export const UpdateEngagementStateTool = Tool.define("update_engagement_state", 
   description: DESCRIPTION,
   parameters: UpdateParametersSchema,
   async execute(params, ctx) {
-    const sessionID = ctx.sessionID
+    // Use root session ID so all agents in the tree share the same state
+    const sessionID = getRootSession(ctx.sessionID)
 
-    log.info("update_engagement_state called", { sessionID, keys: Object.keys(params) })
+    log.info("update_engagement_state called", {
+      sessionID: sessionID.slice(-8),
+      callerSessionID: ctx.sessionID.slice(-8),
+      keys: Object.keys(params)
+    })
 
     // Load existing state
     const existingState = await loadEngagementState(sessionID)
+
+    // Capture previous access level for auto-capture check (Doc 13 §Auto-Capture)
+    const previousAccessLevel = existingState.accessLevel as "none" | "user" | "root" | undefined
 
     // Merge updates
     const newState = mergeState(existingState, params)
 
     // Save updated state
     await saveEngagementState(sessionID, newState)
+
+    // Check for auto-capture trigger (Doc 13 §Pattern Capture)
+    // Run asynchronously to not block the tool response
+    const newAccessLevel = newState.accessLevel as "none" | "user" | "root" | undefined
+    if (previousAccessLevel !== newAccessLevel) {
+      // Fire and forget - don't await, don't block
+      checkAutoCapturePattern(sessionID, previousAccessLevel, newAccessLevel).catch((err) => {
+        log.error("auto-capture failed", { error: String(err) })
+      })
+    }
 
     // Build summary of what was updated
     const updates: string[] = []
@@ -401,9 +590,13 @@ export const ReadEngagementStateTool = Tool.define("read_engagement_state", {
   description: READ_DESCRIPTION,
   parameters: z.object({}),
   async execute(_params, ctx) {
-    const sessionID = ctx.sessionID
+    // Use root session ID so all agents in the tree share the same state
+    const sessionID = getRootSession(ctx.sessionID)
 
-    log.info("read_engagement_state called", { sessionID })
+    log.info("read_engagement_state called", {
+      sessionID: sessionID.slice(-8),
+      callerSessionID: ctx.sessionID.slice(-8)
+    })
 
     const state = await loadEngagementState(sessionID)
 

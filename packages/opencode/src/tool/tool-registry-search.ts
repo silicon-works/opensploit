@@ -6,6 +6,18 @@ import os from "os"
 import fs from "fs/promises"
 import yaml from "js-yaml"
 import { Log } from "../util/log"
+import {
+  updateSearchContext,
+  getToolContext,
+  unifiedSearch,
+  formatUnifiedResults,
+  type SearchResult,
+  type ScoredTool,
+  type SearchContext,
+  importToolsFromRegistry,
+  loadToolsFromLanceDB,
+  toolsNeedSync,
+} from "../memory"
 
 const log = Log.create({ service: "tool.registry-search" })
 
@@ -54,7 +66,7 @@ const NeverUseForEntrySchema = z.union([
   z.string(),
   z.object({
     task: z.string(),
-    use_instead: z.union([z.string(), z.array(z.string())]),
+    use_instead: z.union([z.string(), z.array(z.string())]).optional(),
     reason: z.string().optional(),
   }),
 ])
@@ -91,7 +103,7 @@ const RegistryToolSchema = z.object({
     })
     .optional(),
   methods: z.record(z.string(), MethodDefSchema).optional(),
-})
+}).passthrough() // Allow extra fields like see_also, warnings, internal
 
 const RegistrySchema = z.object({
   version: z.string(),
@@ -241,6 +253,42 @@ interface GetRegistryResult {
   cacheStatus: "fresh" | "stale" | "new"
 }
 
+/**
+ * Sync registry data to LanceDB tools table (non-blocking).
+ * Called after loading from YAML to keep LanceDB in sync.
+ */
+async function syncToLanceDB(registry: Registry): Promise<void> {
+  try {
+    if (await toolsNeedSync(registry.version)) {
+      await importToolsFromRegistry(registry.tools, registry.version)
+      log.info("synced registry to LanceDB", { version: registry.version })
+    }
+  } catch (error) {
+    // Non-critical — LanceDB sync failure doesn't block tool search
+    log.warn("failed to sync registry to LanceDB", { error: String(error) })
+  }
+}
+
+/**
+ * Try to load registry from LanceDB tools table.
+ * Returns null if unavailable.
+ */
+async function loadFromLanceDB(): Promise<Registry | null> {
+  try {
+    const result = await loadToolsFromLanceDB()
+    if (!result) return null
+
+    // Reconstruct Registry format and validate
+    const parsed = { version: result.version, tools: result.tools }
+    const validated = RegistrySchema.parse(parsed)
+    log.info("loaded registry from LanceDB", { version: validated.version })
+    return validated
+  } catch (error) {
+    log.debug("LanceDB registry load failed", { error: String(error) })
+    return null
+  }
+}
+
 async function getRegistry(): Promise<GetRegistryResult> {
   const now = Date.now()
 
@@ -249,27 +297,30 @@ async function getRegistry(): Promise<GetRegistryResult> {
     return { registry: memoryCache.registry, cacheStatus: "fresh" }
   }
 
-  // Check disk cache
-  const cacheTimestamp = await getCacheTimestamp()
-  const diskCache = cacheTimestamp ? await loadCacheFromDisk() : null
-
-  // If disk cache is fresh, use it
-  if (diskCache && cacheTimestamp && !isCacheStale(cacheTimestamp)) {
-    memoryCache = { registry: diskCache, timestamp: cacheTimestamp }
-    return { registry: diskCache, cacheStatus: "fresh" }
-  }
-
-  // Try to fetch from remote
+  // Try to fetch from remote (primary source)
   const remote = await fetchRemoteRegistry()
   if (remote) {
     memoryCache = { registry: remote, timestamp: now }
+    // Sync to LanceDB in background (non-blocking)
+    syncToLanceDB(remote)
     return { registry: remote, cacheStatus: "new" }
   }
 
-  // Fall back to stale disk cache
+  // Remote failed — try LanceDB (secondary source)
+  const lanceDBRegistry = await loadFromLanceDB()
+  if (lanceDBRegistry) {
+    memoryCache = { registry: lanceDBRegistry, timestamp: now }
+    return { registry: lanceDBRegistry, cacheStatus: "stale" }
+  }
+
+  // LanceDB failed — try disk cache (fallback)
+  const cacheTimestamp = await getCacheTimestamp()
+  const diskCache = cacheTimestamp ? await loadCacheFromDisk() : null
   if (diskCache) {
-    log.warn("using stale cache, remote fetch failed")
+    log.warn("using YAML disk cache, remote and LanceDB both unavailable")
     memoryCache = { registry: diskCache, timestamp: cacheTimestamp! }
+    // Try to sync to LanceDB from disk cache
+    syncToLanceDB(diskCache)
     return { registry: diskCache, cacheStatus: "stale" }
   }
 
@@ -282,12 +333,12 @@ async function getRegistry(): Promise<GetRegistryResult> {
 // =============================================================================
 
 function buildSearchText(tool: RegistryTool): string {
+  // Note: use_for and triggers are handled separately in bonus functions
+  // to give them appropriate weighting (see Doc 22 §Part 1)
   const parts: string[] = [
     tool.name,
     tool.description,
     ...(tool.capabilities || []),
-    ...(tool.routing?.use_for || []),
-    ...(tool.routing?.triggers || []),
   ]
 
   // Add method names and descriptions
@@ -302,6 +353,100 @@ function buildSearchText(tool: RegistryTool): string {
   }
 
   return parts.join(" ").toLowerCase()
+}
+
+/**
+ * Bug Fix 1: Triggers should be matched as regex patterns
+ * Doc 22 §Part 1, Bug 1 (lines 274-290)
+ *
+ * Example: trigger "CVE-\\d{4}-\\d+" should match query "CVE-2024-48990"
+ */
+function calculateTriggerBonus(query: string, tool: RegistryTool): number {
+  let bonus = 0
+  const triggers = tool.routing?.triggers || []
+
+  for (const trigger of triggers) {
+    try {
+      const regex = new RegExp(trigger, "i")
+      if (regex.test(query)) {
+        // Strong bonus for trigger match - must overcome keyword flooding
+        // (e.g., exploit-runner has "exploit" 13x in text = 39+ keyword points)
+        bonus += 35
+        log.debug("trigger regex matched", { tool: tool.name, trigger, query })
+      }
+    } catch {
+      // Invalid regex pattern - skip silently
+      log.debug("invalid trigger regex", { tool: tool.name, trigger })
+    }
+  }
+
+  return bonus
+}
+
+/**
+ * Bug Fix 2: use_for should receive bonus weighting
+ * Doc 22 §Part 1, Bug 2 (lines 292-309)
+ *
+ * use_for contains high-signal phrases like "find exploit for CVE"
+ * These should be weighted higher than general description matches
+ */
+function calculateUseForBonus(query: string, tool: RegistryTool): number {
+  let bonus = 0
+  const queryLower = query.toLowerCase()
+  const useForList = tool.routing?.use_for || []
+
+  for (const useFor of useForList) {
+    const useForLower = useFor.toLowerCase()
+
+    // Exact phrase match in query
+    if (queryLower.includes(useForLower)) {
+      bonus += 8
+      log.debug("use_for exact match", { tool: tool.name, useFor, query })
+    }
+    // Reverse: query is contained in use_for (partial match)
+    else if (useForLower.includes(queryLower)) {
+      bonus += 5
+      log.debug("use_for partial match", { tool: tool.name, useFor, query })
+    }
+    // Word overlap check (with partial matching for compound terms like "CVE-2024-48990")
+    else {
+      const useForWords = useForLower.split(/\s+/)
+      const queryWords = queryLower.split(/\s+/)
+      // Match words that start with or are contained in each other
+      // This handles "cve" matching "cve-2024-48990"
+      const overlap = useForWords.filter((w) =>
+        queryWords.some((qw) => qw.startsWith(w) || w.startsWith(qw) || qw === w)
+      )
+      if (overlap.length >= 2) {
+        bonus += 3 // Multiple word overlap
+      }
+    }
+  }
+
+  return bonus
+}
+
+/**
+ * Bug Fix 3: never_use_for should penalize score
+ * Doc 22 §Part 1, Bug 3 (lines 311-326)
+ *
+ * If a tool explicitly says "don't use for X" and query is about X,
+ * the tool should be ranked lower, not just warned about
+ */
+function calculateNeverUseForPenalty(query: string, tool: RegistryTool): number {
+  let penalty = 0
+  const queryLower = query.toLowerCase()
+  const neverUseFor = tool.routing?.never_use_for || []
+
+  for (const pattern of neverUseFor) {
+    const task = typeof pattern === "string" ? pattern : pattern.task
+    if (task && queryLower.includes(task.toLowerCase())) {
+      penalty -= 15 // Heavy penalty
+      log.debug("never_use_for penalty applied", { tool: tool.name, task, query })
+    }
+  }
+
+  return penalty
 }
 
 function countKeywordMatches(query: string, searchText: string): number {
@@ -416,11 +561,18 @@ function formatToolResult(toolId: string, tool: RegistryTool, warning?: string):
   }
 }
 
-interface ScoredTool {
+interface LocalScoredTool {
   toolId: string
   tool: RegistryTool
   score: number
   warning?: string
+}
+
+interface SearchToolsResult {
+  results: ToolResult[]
+  warnings: string[]
+  /** Scored results for experience tracking */
+  scoredResults: Array<{ tool: string; score: number; description: string }>
 }
 
 function searchTools(
@@ -429,31 +581,46 @@ function searchTools(
   phase?: string,
   capability?: string,
   limit: number = 5
-): { results: ToolResult[]; warnings: string[] } {
-  const scoredTools: ScoredTool[] = []
+): SearchToolsResult {
+  const scoredTools: LocalScoredTool[] = []
   const warnings: string[] = []
 
   for (const [toolId, tool] of Object.entries(registry.tools)) {
-    // Phase filter
-    if (phase && !tool.phases?.includes(phase)) {
-      continue
-    }
-
-    // Capability filter
+    // Capability filter (hard filter - capability is specific requirement)
     if (capability && !tool.capabilities?.includes(capability)) {
       continue
     }
 
-    // Keyword matching
+    // Base score: keyword matching
     const searchText = buildSearchText(tool)
-    const score = countKeywordMatches(query, searchText)
+    let score = countKeywordMatches(query, searchText)
 
-    // Check anti-patterns
+    // Bug Fix 1: Trigger regex matching bonus
+    score += calculateTriggerBonus(query, tool)
+
+    // Bug Fix 2: use_for phrase matching bonus
+    score += calculateUseForBonus(query, tool)
+
+    // Bug Fix 3: never_use_for penalty
+    score += calculateNeverUseForPenalty(query, tool)
+
+    // Bug Fix 4: Phase boost instead of filter
+    // Doc 22 §Part 1, Bug 4 (lines 328-335)
+    // Tools matching the requested phase get a bonus, but others are not excluded
+    if (phase) {
+      if (tool.phases?.includes(phase)) {
+        score += 5 // Bonus for phase match
+      }
+      // No 'continue' here - tools without phase match can still appear
+    }
+
+    // Check anti-patterns (for warnings, penalty already applied above)
     const antiPatternWarning = checkAntiPatterns(query, tool)
     if (antiPatternWarning) {
       warnings.push(antiPatternWarning)
     }
 
+    // Include tools with positive score
     if (score > 0) {
       scoredTools.push({ toolId, tool, score, warning: antiPatternWarning })
     }
@@ -462,10 +629,24 @@ function searchTools(
   // Sort by score descending
   scoredTools.sort((a, b) => b.score - a.score)
 
-  // Format top results
-  const results = scoredTools.slice(0, limit).map((st) => formatToolResult(st.toolId, st.tool, st.warning))
+  log.debug("search scores", {
+    query,
+    phase,
+    topResults: scoredTools.slice(0, 5).map((t) => ({ tool: t.toolId, score: t.score })),
+  })
 
-  return { results, warnings: [...new Set(warnings)] }
+  // Format top results
+  const topScoredTools = scoredTools.slice(0, limit)
+  const results = topScoredTools.map((st) => formatToolResult(st.toolId, st.tool, st.warning))
+
+  // Build scored results for experience tracking
+  const scoredResults = topScoredTools.map((st) => ({
+    tool: st.toolId,
+    score: st.score,
+    description: st.tool.description,
+  }))
+
+  return { results, warnings: [...new Set(warnings)], scoredResults }
 }
 
 // =============================================================================
@@ -607,17 +788,33 @@ export const ToolRegistrySearchTool = Tool.define("tool_registry_search", {
       .optional()
       .describe("Filter by specific capability (e.g., 'sql_injection', 'port_scanning', 'web_fuzzing')"),
     limit: z.number().optional().default(5).describe("Maximum number of results to return (default: 5)"),
+    explain: z.boolean().optional().default(false).describe("Include detailed score breakdown for debugging ranking decisions"),
   }),
-  async execute(params, _ctx) {
-    const { query, phase, capability, limit = 5 } = params
+  async execute(params, ctx) {
+    const { query, phase, capability, limit = 5, explain = false } = params
 
-    log.info("searching tool registry", { query, phase, capability, limit })
+    log.info("searching tool registry", { query, phase, capability, limit, explain })
 
     // Get registry with caching
     const { registry, cacheStatus } = await getRegistry()
 
     // Search tools
-    const { results, warnings } = searchTools(registry, query, phase, capability, limit)
+    const { results, warnings, scoredResults } = searchTools(registry, query, phase, capability, limit)
+
+    // Update tool context for experience tracking (Doc 22 §Agent Loop Integration)
+    // This records the search query and results so subsequent tool invocations
+    // can be attributed to this search for learning purposes
+    try {
+      const searchResultsForContext: SearchResult[] = scoredResults.map((sr) => ({
+        tool: sr.tool,
+        score: sr.score,
+        description: sr.description,
+      }))
+      updateSearchContext(ctx.sessionID, query, searchResultsForContext)
+    } catch (error) {
+      // Don't fail the search if context update fails
+      log.warn("failed to update search context", { error: String(error) })
+    }
 
     // Build result
     const searchResult: ToolSearchResult = {
@@ -630,8 +827,52 @@ export const ToolRegistrySearchTool = Tool.define("tool_registry_search", {
       cache_status: cacheStatus,
     }
 
-    // Format output
-    const output = formatOutput(searchResult)
+    // Format base output
+    let output = formatOutput(searchResult)
+
+    // Phase 5: Unified Search with experiences and insights
+    // Convert tool results to ScoredTool format for unifiedSearch
+    try {
+      const toolContext = getToolContext(ctx.sessionID)
+      const scoredToolsForUnified: ScoredTool[] = scoredResults.map((sr) => {
+        // Find the full tool result to get phases/capabilities/routing
+        const fullResult = results.find((r) => r.tool === sr.tool)
+        return {
+          id: sr.tool,
+          name: fullResult?.name ?? sr.tool,
+          score: sr.score,
+          description: sr.description,
+          phases: fullResult?.phases,
+          capabilities: fullResult?.capabilities,
+          routing: fullResult?.routing
+            ? {
+                use_for: fullResult.routing.use_for,
+                triggers: fullResult.routing.triggers,
+                never_use_for: fullResult.routing.never_use_for,
+              }
+            : undefined,
+        }
+      })
+
+      // Build search context from tool context
+      const searchContext: SearchContext = {
+        phase: toolContext?.currentPhase ?? phase,
+        toolsTried: toolContext?.toolsTried,
+        recentSuccesses: toolContext?.recentSuccesses,
+      }
+
+      // Run unified search to get experiences and insights
+      const unifiedResult = await unifiedSearch(query, scoredToolsForUnified, searchContext, explain)
+
+      // Append experience/insight information to output
+      const memoryOutput = formatUnifiedResults(unifiedResult)
+      if (memoryOutput.trim()) {
+        output += "\n" + memoryOutput
+      }
+    } catch (error) {
+      // Don't fail the search if unified search fails
+      log.warn("unified search failed, returning tool-only results", { error: String(error) })
+    }
 
     return {
       output,

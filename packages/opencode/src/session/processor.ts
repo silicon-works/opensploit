@@ -16,6 +16,7 @@ import { SessionCompaction } from "./compaction"
 import { PermissionNext } from "@/permission/next"
 import { Question } from "@/question"
 import * as OutputStore from "@/tool/output-store"
+import { getRootSession } from "@/session/hierarchy"
 import { MCP } from "@/mcp"
 import { parseTVAR, extractPhase, stripTVARBlocks } from "./tvar-parser"
 
@@ -78,9 +79,10 @@ export namespace SessionProcessor {
       // Extract data (everything except raw_output)
       const { raw_output: rawOutput, ...data } = parsed
 
-      // Pass through Output Store
+      // Pass through Output Store (route to root session so all agents' outputs are in one directory)
+      const rootSessionId = getRootSession(sessionID)
       const result = await OutputStore.store({
-        sessionId: sessionID,
+        sessionId: rootSessionId,
         tool: toolBase,
         method,
         data,
@@ -91,7 +93,7 @@ export namespace SessionProcessor {
         log.info("mcp output stored", {
           tool: toolName,
           outputId: result.outputId,
-          sessionId: sessionID.slice(-8),
+          rootSessionId: rootSessionId.slice(-8),
         })
       }
 
