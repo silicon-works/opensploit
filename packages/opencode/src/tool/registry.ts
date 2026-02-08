@@ -28,6 +28,7 @@ import { SavePatternTool } from "./save-pattern"
 import { ReadToolOutputTool } from "./read-tool-output"
 import { HostsTool } from "./hosts"
 import { McpToolInvoke } from "./mcp-tool"
+import { BrowserHeadedTool } from "./browser-headed"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
@@ -123,6 +124,7 @@ export namespace ToolRegistry {
       SavePatternTool,
       ReadToolOutputTool,
       HostsTool,
+      BrowserHeadedTool,
       SkillTool,
       ApplyPatchTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),

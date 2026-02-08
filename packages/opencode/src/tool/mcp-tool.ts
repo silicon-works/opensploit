@@ -5,7 +5,6 @@ import { Log } from "../util/log"
 import { store as storeOutput } from "./output-store"
 import { TargetValidation } from "./target-validation"
 import { PhaseGating } from "./phase-gating"
-import { Permission } from "../permission"
 import { getRootSession } from "../session/hierarchy"
 import * as SessionDirectory from "../session/directory"
 import path from "path"
@@ -275,30 +274,24 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
         setCurrentPhase(sessionId, toolPhase)
       }
 
-      // Ask permission to run the MCP tool
+      // Ask permission to run the MCP tool via PermissionNext (respects agent rules)
       try {
-        await Permission.ask({
-          type: "mcp_tool",
-          message: `Run ${toolName}.${method}?`,
-          pattern: `mcp:${toolName}:${method}`,
-          sessionID: ctx.sessionID,
-          messageID: ctx.messageID,
-          callID: ctx.callID,
+        await ctx.ask({
+          permission: "mcp_tool",
+          patterns: [`mcp:${toolName}:${method}`],
+          always: [`mcp:${toolName}:*`],
           metadata: {
             tool: toolName,
             method,
             args,
           },
         })
-      } catch (error) {
-        if (error instanceof Permission.RejectedError) {
-          return {
-            output: `Permission denied to run ${toolName}.${method}`,
-            title: `Blocked: Permission denied`,
-            metadata: { tool: toolName, method, success: false, error: "Permission denied" },
-          }
+      } catch {
+        return {
+          output: `Permission denied to run ${toolName}.${method}`,
+          title: `Blocked: Permission denied`,
+          metadata: { tool: toolName, method, success: false, error: "Permission denied" },
         }
-        throw error
       }
 
       // Determine if we should use local server or Docker

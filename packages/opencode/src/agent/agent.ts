@@ -23,6 +23,7 @@ import PROMPT_PENTEST_POST from "./prompt/pentest/post.txt"
 import PROMPT_PENTEST_REPORT from "./prompt/pentest/report.txt"
 import PROMPT_PENTEST_RESEARCH from "./prompt/pentest/research.txt"
 import PROMPT_PENTEST_BUILD from "./prompt/pentest/build.txt"
+import PROMPT_PENTEST_CAPTCHA from "./prompt/pentest/captcha.txt"
 import { PermissionNext } from "@/permission/next"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@/global"
@@ -340,6 +341,24 @@ export namespace Agent {
         description: "Exploit and payload builder - finds or creates tested exploits",
         prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_BUILD,
         permission: PermissionNext.merge(defaults, pentestPermission, user),
+        options: {},
+      },
+      "pentest/captcha": {
+        name: "pentest/captcha",
+        mode: "subagent",
+        native: true,
+        color: "#f1c40f",
+        description: "CAPTCHA coordinator - detects CAPTCHAs and hands off to human user for solving",
+        prompt: PROMPT_PENTEST_BASE + "\n\n" + PROMPT_PENTEST_CAPTCHA,
+        temperature: 0.2,
+        permission: PermissionNext.merge(
+          defaults,
+          pentestPermission,
+          PermissionNext.fromConfig({
+            question: "allow",
+          }),
+          user,
+        ),
         options: {},
       },
     }

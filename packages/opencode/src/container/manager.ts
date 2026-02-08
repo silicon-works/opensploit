@@ -32,6 +32,33 @@ export namespace ContainerManager {
   const serviceContainers = new Map<string, string>() // serviceName -> toolName
   let cleanupInterval: ReturnType<typeof setInterval> | null = null
 
+  // Environment variable overrides for next container start (used by browser_headed_mode)
+  const envOverrides = new Map<string, Record<string, string>>()
+
+  /**
+   * Set environment variable overrides for a tool's next container start.
+   * The existing container must be stopped first for these to take effect.
+   */
+  export function setEnvOverrides(toolName: string, env: Record<string, string>): void {
+    envOverrides.set(toolName, env)
+    log.info("env overrides set", { toolName, keys: Object.keys(env) })
+  }
+
+  /**
+   * Clear environment variable overrides for a tool.
+   */
+  export function clearEnvOverrides(toolName: string): void {
+    envOverrides.delete(toolName)
+    log.info("env overrides cleared", { toolName })
+  }
+
+  /**
+   * Get current environment variable overrides for a tool.
+   */
+  export function getEnvOverrides(toolName: string): Record<string, string> | undefined {
+    return envOverrides.get(toolName)
+  }
+
   /**
    * Check if Docker is available
    */
@@ -121,6 +148,8 @@ export namespace ContainerManager {
     serviceName?: string
     /** Use network from an existing service container */
     useServiceNetwork?: string
+    /** Environment variables to pass to the container */
+    env?: Record<string, string>
   }
 
   /**
@@ -210,8 +239,21 @@ export namespace ContainerManager {
       dockerArgs.push("--name", containerName)
     }
 
+    // Build merged env early — needed for network decision
+    const mergedEnv: Record<string, string> = {
+      ...(envOverrides.get(toolName) ?? {}),
+      ...(options?.env ?? {}),
+    }
+
     // Network configuration
-    if (options?.useServiceNetwork) {
+    // Headed mode (HEADED=1) forces --network=host so VNC port 6080 is accessible
+    // on localhost. The entrypoint's socat proxy handles VPN connectivity for headed Chrome.
+    const forceHostNetwork = mergedEnv.HEADED === "1"
+
+    if (forceHostNetwork) {
+      dockerArgs.push("--network=host")
+      log.info("headed mode: forcing host network for VNC access", { toolName })
+    } else if (options?.useServiceNetwork) {
       // Use network from existing service container
       const serviceDockerContainerId = getActiveServiceNetwork(options.useServiceNetwork)
       if (serviceDockerContainerId) {
@@ -230,6 +272,10 @@ export namespace ContainerManager {
     if (options?.privileged) {
       dockerArgs.push("--privileged")
       log.info("running container in privileged mode", { toolName, image })
+    }
+    // Pass environment variables to container
+    for (const [key, value] of Object.entries(mergedEnv)) {
+      dockerArgs.push("-e", `${key}=${value}`)
     }
     // Mount session directory for wordlists, artifacts, etc.
     if (options?.sessionDir) {
