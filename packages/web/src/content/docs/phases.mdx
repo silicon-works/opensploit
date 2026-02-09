@@ -1,0 +1,172 @@
+---
+title: Penetration Testing Phases
+description: OpenSploit's five-phase penetration testing methodology with automated phase transitions and tool recommendations.
+---
+
+OpenSploit follows a structured penetration testing methodology with five phases. The agent automatically transitions between phases based on findings, though you can override this manually.
+
+## Phase Overview
+
+```
+Reconnaissance → Enumeration → Exploitation → Post-Exploitation → Reporting
+```
+
+## 1. Reconnaissance
+
+**Goal:** Discover what's running on the target
+
+The first phase focuses on understanding the attack surface:
+
+- Port scanning (TCP/UDP)
+- Service detection and version identification
+- OS fingerprinting
+- Web technology detection
+
+**Key Tools:**
+- `nmap` - Port scanning and service detection
+- `web-fingerprint` - Web technology identification
+- `whatweb` - Additional web fingerprinting
+
+**Example:**
+```
+> Perform reconnaissance on 10.10.10.1
+
+Running nmap full port scan...
+Found open ports: 22/tcp (SSH), 80/tcp (HTTP), 443/tcp (HTTPS)
+Detected OS: Linux (Ubuntu)
+Web server: nginx 1.18.0
+```
+
+## 2. Enumeration
+
+**Goal:** Gather detailed information about discovered services
+
+With services identified, enumerate them deeply:
+
+- Directory and file discovery
+- Vulnerability scanning
+- Version-specific CVE research
+- Application mapping
+
+**Key Tools:**
+- `ffuf` / `gobuster` - Directory bruteforcing
+- `nikto` - Web vulnerability scanning
+- `nuclei` - Template-based scanning
+- `cve-lookup` - CVE research
+
+**Example:**
+```
+> Enumerate the web application on port 80
+
+Running directory scan...
+Found: /admin, /api, /uploads, /backup
+Running nuclei vulnerability scan...
+Found: CVE-2021-XXXXX in detected CMS
+```
+
+## 3. Exploitation
+
+**Goal:** Gain initial access to the target
+
+Attempt to exploit discovered vulnerabilities:
+
+- SQL injection testing
+- Credential attacks
+- Known vulnerability exploitation
+- Custom exploit execution
+
+**Key Tools:**
+- `sqlmap` - SQL injection
+- `hydra` - Credential brute-forcing
+- `metasploit` - Exploitation framework
+- `exploit-runner` - Custom exploits
+
+**Example:**
+```
+> Test the login form for SQL injection
+
+Running sqlmap on /login endpoint...
+Vulnerability found: time-based blind SQL injection
+Extracting database schema...
+Found credentials in users table
+```
+
+## 4. Post-Exploitation
+
+**Goal:** Escalate privileges and maintain access
+
+After gaining initial access:
+
+- Privilege escalation
+- Credential harvesting
+- Lateral movement
+- Persistence mechanisms
+
+**Key Tools:**
+- `privesc` - Privilege escalation enumeration
+- `ssh` - Remote access
+- `tunnel` - Port forwarding and pivoting
+- `mysql` / `mongodb` - Database access
+
+**Example:**
+```
+> I have SSH access as www-data. Escalate privileges.
+
+Running privilege escalation checks...
+Found: SUID binary /usr/bin/find
+Exploiting via: find . -exec /bin/sh \; -quit
+Gained root access
+```
+
+## 5. Reporting
+
+**Goal:** Document findings and generate reports
+
+Aggregate all findings into a professional report:
+
+- Finding categorization by severity
+- Evidence collection
+- Remediation recommendations
+- Multiple output formats
+
+**Output Formats:**
+- Markdown
+- HTML
+- PDF (planned)
+
+**Severity Levels:**
+- **Critical** - Immediate exploitation possible
+- **High** - Significant security impact
+- **Medium** - Moderate risk
+- **Low** - Minor issues
+- **Info** - Informational findings
+
+## Phase Transitions
+
+OpenSploit automatically transitions phases based on:
+
+| Trigger | Transition |
+|---------|------------|
+| Ports/services discovered | Recon → Enumeration |
+| Vulnerabilities identified | Enumeration → Exploitation |
+| Initial access gained | Exploitation → Post-Exploitation |
+| Objectives completed | Any → Reporting |
+
+:::tip
+You can manually override the current phase with `/phase exploitation` or any other phase name.
+:::
+
+## Phase-Appropriate Tools
+
+Each phase has recommended and discouraged tools:
+
+| Phase | Recommended | Discouraged |
+|-------|-------------|-------------|
+| Reconnaissance | nmap, web-fingerprint | sqlmap, metasploit |
+| Enumeration | ffuf, nuclei, nikto | exploitation tools |
+| Exploitation | sqlmap, hydra | reconnaissance tools |
+| Post-Exploitation | privesc, tunnel | scanning tools |
+
+:::note
+OpenSploit will warn if you try to use a tool inappropriate for the current phase.
+:::

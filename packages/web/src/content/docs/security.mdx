@@ -1,0 +1,141 @@
+---
+title: Security & Legal
+description: Authorization requirements, built-in safeguards, legal considerations, and safe testing practices for OpenSploit.
+---
+
+OpenSploit is designed for **authorized security testing only**. This page covers the safety features and legal considerations.
+
+## Authorization Requirements
+
+:::caution
+You must have explicit written permission before testing any system.
+:::
+
+Unauthorized access to computer systems is illegal under laws including:
+- **Computer Fraud and Abuse Act (CFAA)** - United States
+- **Computer Misuse Act** - United Kingdom
+- **Similar legislation** in most countries worldwide
+
+Violations can result in criminal prosecution, civil liability, and imprisonment.
+
+## Built-in Safeguards
+
+### Target Validation
+
+OpenSploit warns before scanning non-private IP addresses:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  ⚠️  EXTERNAL TARGET WARNING                                │
+│                                                             │
+│  You are about to scan: example.com                         │
+│  This is NOT a localhost or private IP address.             │
+│                                                             │
+│  Before proceeding, confirm:                                │
+│  ☐ I have written authorization to test this target         │
+│  ☐ I understand unauthorized testing is illegal             │
+│  ☐ I accept full responsibility for this action             │
+│                                                             │
+│  [Cancel]                              [Proceed with Scan]  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Forbidden Targets
+
+OpenSploit blocks scanning of certain targets:
+- Government domains (.gov, .mil)
+- Critical infrastructure
+- Known protected networks
+
+### Audit Logging
+
+All actions are logged for accountability:
+
+```
+Location: ~/.opensploit/audit.log
+Format: JSON Lines (machine-parseable)
+Contents: timestamp, session, action, target, result
+```
+
+## Approval Flow
+
+OpenSploit requests explicit approval before:
+
+- Scanning external/non-private IP addresses
+- Running privileged containers
+- Executing exploits
+- Modifying files on target systems
+- Downloading sensitive data
+
+## Safe Testing Targets
+
+For learning and practice, use authorized targets:
+
+### Local Labs
+- **Docker vulnerable apps** - DVWA, bWAPP, Mutillidae
+- **VMs** - Metasploitable, VulnHub machines
+- **Your own systems** - Local development environments
+
+### Online Labs (Authorized)
+- **HackTheBox** - hackthebox.com
+- **TryHackMe** - tryhackme.com
+- **PortSwigger Web Security Academy** - portswigger.net
+- **PentesterLab** - pentesterlab.com
+
+### Bug Bounty Programs
+Many companies run authorized bug bounty programs with defined scope.
+
+## Data Handling
+
+### Local-First Architecture
+
+OpenSploit runs entirely on your machine:
+- No data sent to external servers (except LLM API calls)
+- Session data stored locally
+- Findings stored locally
+- No telemetry
+
+### Credential Security
+
+- API keys stored in system keychain where available
+- Discovered credentials marked as sensitive
+- Session data readable only by owner (600 permissions)
+
+### Container Isolation
+
+Security tools run in isolated Docker containers:
+- No access to Docker socket
+- Minimal capabilities
+- Read-only filesystem where possible
+
+## Responsible Disclosure
+
+If you discover vulnerabilities using OpenSploit:
+
+1. **Do not exploit** beyond proof of concept
+2. **Document findings** with reproduction steps
+3. **Report privately** to the organization
+4. **Allow reasonable time** for remediation
+5. **Follow coordinated disclosure** practices
+
+## Legal Disclaimer
+
+:::caution
+OpenSploit is provided "as is" without warranty. Users are solely responsible for:
+
+- Obtaining proper authorization
+- Complying with all applicable laws
+- Ethical use of the software
+- Any consequences of their actions
+
+The developers of OpenSploit assume no liability for misuse of the software.
+:::
+
+## Reporting Security Issues
+
+Found a security issue in OpenSploit itself? Report it to:
+
+- Email: security@opensploit.ai
+- GitHub: Private security advisories
+
+Please allow 90 days for remediation before public disclosure.

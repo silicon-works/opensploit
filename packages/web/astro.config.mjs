@@ -181,6 +181,10 @@ export default defineConfig({
         "windows-wsl",
         "1-0",
         {
+          label: "Pentest",
+          items: ["phases", "security-tools", "security"],
+        },
+        {
           label: "Usage",
           translations: {
             en: "Usage",

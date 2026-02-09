@@ -1,0 +1,114 @@
+---
+title: Security Tools
+description: How OpenSploit orchestrates 25+ security tools via MCP Docker containers, organized by pentest phase.
+---
+
+OpenSploit orchestrates 25+ security tools via the Model Context Protocol (MCP). Tools run in Docker containers and are downloaded on-demand when first used.
+
+## How Tools Work
+
+1. **Tool Registry RAG** - Agents discover tools by querying a semantic search system
+2. **On-Demand Download** - Tool containers are pulled from the registry when needed
+3. **MCP Communication** - OpenSploit communicates with tools via JSON-RPC over stdio
+4. **Container Isolation** - Each tool runs in its own Docker container
+
+:::note
+This page covers the security-specific MCP tools. For configuring built-in LLM tools (bash, edit, read, etc.), see [Tools](/docs/tools).
+:::
+
+## Tool Categories
+
+### Reconnaissance
+
+| Tool | Description |
+|------|-------------|
+| **nmap** | Port scanning, service detection, OS fingerprinting |
+| **web-fingerprint** | Web technology detection (CMS, frameworks, servers) |
+| **whatweb** | Web technology fingerprinting |
+
+### Enumeration
+
+| Tool | Description |
+|------|-------------|
+| **ffuf** | Web fuzzing, directory bruteforcing |
+| **gobuster** | Directory and DNS bruteforcing |
+| **nikto** | Web server vulnerability scanning |
+| **nuclei** | Template-based vulnerability scanning |
+| **wpscan** | WordPress vulnerability scanning |
+| **cve-lookup** | CVE research via NVD API |
+
+### Exploitation
+
+| Tool | Description |
+|------|-------------|
+| **sqlmap** | SQL injection testing and exploitation |
+| **hydra** | Password brute-forcing |
+| **metasploit** | Exploitation framework |
+| **curl** | HTTP requests, RCE injection |
+| **ssh** | Remote command execution |
+| **netcat** | Reverse shell listener |
+| **payload** | Binary compilation, reverse shells |
+| **nosqlmap** | NoSQL injection testing |
+
+### Post-Exploitation
+
+| Tool | Description |
+|------|-------------|
+| **privesc** | Privilege escalation enumeration |
+| **tunnel** | SSH port forwarding, SOCKS proxy |
+| **mysql** | MySQL database queries |
+| **mongodb** | MongoDB client |
+| **john** | Password cracking |
+
+## Tool Selection Hierarchy
+
+OpenSploit prioritizes tools based on specificity:
+
+1. **Skills (Level 1)** - Composite workflows that orchestrate multiple tools
+2. **Specialized Tools (Level 2)** - Purpose-built tools for specific tasks
+3. **General-Purpose Tools (Level 3)** - Flexible tools like curl, netcat
+
+:::tip
+For example, when testing for SQL injection, OpenSploit will prefer `sqlmap` over `curl` even though both can send HTTP requests.
+:::
+
+## Privileged Containers
+
+Some tools require elevated privileges for raw socket access:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  ⚠️  PRIVILEGED CONTAINER REQUIRED                          │
+│                                                             │
+│  Tool: nmap (port_scan with SYN scan)                       │
+│  Target: 10.10.10.1                                         │
+│                                                             │
+│  This tool requires elevated privileges for:                │
+│    • Raw socket access (SYN scans, OS detection)            │
+│    • Network interface access                               │
+│                                                             │
+│  Container isolation still applies.                         │
+│  This action will be logged.                                │
+│                                                             │
+│  [Deny]                              [Allow]                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Enabling/Disabling Tools
+
+Configure tool availability in your config:
+
+```json
+{
+  "tools": {
+    "metasploit": false,
+    "sqlmap": true
+  }
+}
+```
+
+## Tool Output Management
+
+Large tool outputs (>5000 characters) are stored externally to prevent context overflow. The agent receives a summary with a reference ID for retrieving the full output when needed.
+
+Output storage location: `~/.opensploit/outputs/{session}/`
