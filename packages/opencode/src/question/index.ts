@@ -2,6 +2,7 @@ import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
 import { Identifier } from "@/id/id"
 import { Instance } from "@/project/instance"
+import { getRootSession } from "@/session/hierarchy"
 import { Log } from "@/util/log"
 import z from "zod"
 
@@ -102,12 +103,22 @@ export namespace Question {
     const s = await state()
     const id = Identifier.ascending("question")
 
-    log.info("asking", { id, questions: input.questions.length })
+    // Route question to ROOT session for bubbling (mirrors PermissionNext pattern)
+    // Without this, questions from nested sub-agents (grandchildren) would be
+    // published under the sub-agent's sessionID, which the frontend can't display.
+    const rootSessionID = getRootSession(input.sessionID)
+
+    log.info("asking", {
+      id,
+      questions: input.questions.length,
+      sessionID: input.sessionID.slice(-8),
+      rootSessionID: rootSessionID.slice(-8),
+    })
 
     return new Promise<Answer[]>((resolve, reject) => {
       const info: Request = {
         id,
-        sessionID: input.sessionID,
+        sessionID: rootSessionID,
         questions: input.questions,
         tool: input.tool,
       }
