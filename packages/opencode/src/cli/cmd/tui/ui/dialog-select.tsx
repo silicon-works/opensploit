@@ -1,7 +1,7 @@
 import { InputRenderable, RGBA, ScrollBoxRenderable, TextAttributes } from "@opentui/core"
 import { useTheme, selectedForeground } from "@tui/context/theme"
 import { entries, filter, flatMap, groupBy, pipe, take } from "remeda"
-import { batch, createEffect, createMemo, For, Show, type JSX, on } from "solid-js"
+import { batch, createEffect, createMemo, createSignal, For, Show, type JSX, on } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
 import * as fuzzysort from "fuzzysort"
@@ -49,6 +49,7 @@ export type DialogSelectRef<T> = {
 export function DialogSelect<T>(props: DialogSelectProps<T>) {
   const dialog = useDialog()
   const { theme } = useTheme()
+  const [hover, setHover] = createSignal(false)
   const [store, setStore] = createStore({
     selected: 0,
     filter: "",
@@ -72,15 +73,23 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   let input: InputRenderable
 
   const filtered = createMemo(() => {
-    if (props.skipFilter) {
-      return props.options.filter((x) => x.disabled !== true)
-    }
+    if (props.skipFilter) return props.options.filter((x) => x.disabled !== true)
     const needle = store.filter.toLowerCase()
-    const result = pipe(
+    const options = pipe(
       props.options,
       filter((x) => x.disabled !== true),
-      (x) => (!needle ? x : fuzzysort.go(needle, x, { keys: ["title", "category"] }).map((x) => x.obj)),
     )
+    if (!needle) return options
+
+    // prioritize title matches (weight: 2) over category matches (weight: 1).
+    // users typically search by the item name, and not its category.
+    const result = fuzzysort
+      .go(needle, options, {
+        keys: ["title", "category"],
+        scoreFn: (r) => r[0].score * 2 + r[1].score,
+      })
+      .map((x) => x.obj)
+
     return result
   })
 
@@ -136,12 +145,13 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     let next = store.selected + direction
     if (next < 0) next = flat().length - 1
     if (next >= flat().length) next = 0
-    moveTo(next)
+    moveTo(next, true)
   }
 
   function moveTo(next: number, center = false) {
     setStore("selected", next)
-    props.onMove?.(selected()!)
+    const option = selected()
+    if (option) props.onMove?.(option)
     if (!scroll) return
     const target = scroll.getChildren().find((child) => {
       return child.id === JSON.stringify(selected()?.value)
@@ -217,9 +227,18 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           <text fg={theme.text} attributes={TextAttributes.BOLD}>
             {props.title}
           </text>
-          <text fg={theme.textMuted}>esc</text>
+          <box
+            paddingLeft={1}
+            paddingRight={1}
+            backgroundColor={hover() ? theme.primary : undefined}
+            onMouseOver={() => setHover(true)}
+            onMouseOut={() => setHover(false)}
+            onMouseUp={() => dialog.clear()}
+          >
+            <text fg={hover() ? theme.selectedListItemText : theme.textMuted}>esc</text>
+          </box>
         </box>
-        <box paddingTop={1} paddingBottom={1}>
+        <box paddingTop={1}>
           <input
             onInput={(e) => {
               batch(() => {
@@ -232,7 +251,11 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
             focusedTextColor={theme.textMuted}
             ref={(r) => {
               input = r
-              setTimeout(() => input.focus(), 1)
+              setTimeout(() => {
+                if (!input) return
+                if (input.isDestroyed) return
+                input.focus()
+              }, 1)
             }}
             placeholder={props.placeholder ?? "Search"}
           />

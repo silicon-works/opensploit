@@ -64,6 +64,10 @@ export const TuiThreadCommand = cmd({
         type: "string",
         describe: "session id to continue",
       })
+      .option("fork", {
+        type: "boolean",
+        describe: "fork the session when continuing (use with --continue or --session)",
+      })
       .option("prompt", {
         type: "string",
         describe: "prompt to use",
@@ -77,6 +81,11 @@ export const TuiThreadCommand = cmd({
         describe: "enable ultrasploit mode (auto-approve all permissions)",
       }),
   handler: async (args) => {
+    if (args.fork && !args.continue && !args.session) {
+      UI.error("--fork requires --continue or --session")
+      process.exit(1)
+    }
+
     // Resolve relative paths against PWD to preserve behavior when using --cwd flag
     const baseCwd = process.env.PWD ?? process.cwd()
     const cwd = args.project ? path.resolve(baseCwd, args.project) : process.cwd()
@@ -155,6 +164,7 @@ export const TuiThreadCommand = cmd({
         model: args.model,
         prompt,
         ultrasploit: args.ultrasploit,
+        fork: args.fork,
       },
       onExit: async () => {
         await client.call("shutdown", undefined)
