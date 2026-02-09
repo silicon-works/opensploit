@@ -5,6 +5,7 @@ import path from "path"
 import os from "os"
 import fs from "fs/promises"
 import yaml from "js-yaml"
+import * as lancedb from "@lancedb/lancedb"
 import { Log } from "../util/log"
 import {
   updateSearchContext,
@@ -14,10 +15,18 @@ import {
   type SearchResult,
   type ScoredTool,
   type SearchContext,
-  importToolsFromRegistry,
-  loadToolsFromLanceDB,
-  toolsNeedSync,
 } from "../memory"
+import {
+  importFromLance,
+  importFromYAML,
+  loadRegistry,
+  getStoredHash,
+  needsUpdate,
+  hasVectors,
+  TOOLS_TABLE_NAME,
+} from "../memory/tools"
+import { getConnection } from "../memory/database"
+import { getEmbeddingService } from "../memory/embedding"
 
 const log = Log.create({ service: "tool.registry-search" })
 
@@ -27,8 +36,11 @@ const log = Log.create({ service: "tool.registry-search" })
 
 const REGISTRY_CONFIG = {
   REMOTE_URL: "https://opensploit.ai/registry.yaml",
+  REMOTE_HASH_URL: "https://opensploit.ai/registry.sha256",
+  REMOTE_LANCE_URL: "https://opensploit.ai/registry.lance.tar.gz",
   CACHE_DIR: path.join(os.homedir(), ".opensploit"),
   CACHE_PATH: path.join(os.homedir(), ".opensploit", "registry.yaml"),
+  LANCE_CACHE_PATH: path.join(os.homedir(), ".opensploit", "registry.lance.tar.gz"),
   CACHE_TTL_MS: 24 * 60 * 60 * 1000, // 24 hours
 }
 
@@ -164,35 +176,30 @@ interface ToolSearchResult {
   capability?: string
   results: ToolResult[]
   anti_pattern_warnings: string[]
-  registry_version: string
+  registry_hash: string
   cache_status?: "fresh" | "stale" | "new"
 }
 
 // =============================================================================
-// Registry Fetching
+// Registry Fetching — Hash-Based Freshness
 // =============================================================================
 
 interface CacheInfo {
   registry: Registry
+  hash: string
   timestamp: number
 }
 
 let memoryCache: CacheInfo | null = null
+
+/** Cached result of hasVectors() — reset on registry import */
+let _vectorsAvailable: boolean | null = null
 
 async function ensureCacheDir(): Promise<void> {
   try {
     await fs.mkdir(REGISTRY_CONFIG.CACHE_DIR, { recursive: true })
   } catch {
     // Directory may already exist
-  }
-}
-
-async function getCacheTimestamp(): Promise<number | null> {
-  try {
-    const stats = await fs.stat(REGISTRY_CONFIG.CACHE_PATH)
-    return stats.mtime.getTime()
-  } catch {
-    return null
   }
 }
 
@@ -215,18 +222,77 @@ async function loadCacheFromDisk(): Promise<Registry | null> {
   }
 }
 
-async function fetchRemoteRegistry(): Promise<Registry | null> {
+/**
+ * Compute SHA-256 hash of string content.
+ */
+async function computeHash(content: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(content)
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
+}
+
+/**
+ * Fetch remote registry hash (64 bytes, very fast).
+ */
+async function fetchRemoteHash(): Promise<string | null> {
   try {
-    log.info("fetching registry from remote", { url: REGISTRY_CONFIG.REMOTE_URL })
+    const response = await fetch(REGISTRY_CONFIG.REMOTE_HASH_URL, {
+      headers: { "User-Agent": "opensploit-cli" },
+      signal: AbortSignal.timeout(5000), // 5 second timeout — it's tiny
+    })
+    if (!response.ok) return null
+    const text = await response.text()
+    return text.trim()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Download and import .lance archive.
+ */
+async function downloadAndImportLance(hash: string): Promise<boolean> {
+  try {
+    log.info("downloading registry .lance archive", { url: REGISTRY_CONFIG.REMOTE_LANCE_URL })
+    const response = await fetch(REGISTRY_CONFIG.REMOTE_LANCE_URL, {
+      headers: { "User-Agent": "opensploit-cli" },
+      signal: AbortSignal.timeout(60000), // 60 second timeout — larger file
+    })
+    if (!response.ok) {
+      log.warn("failed to download .lance archive", { status: response.status })
+      return false
+    }
+
+    await ensureCacheDir()
+    const buffer = await response.arrayBuffer()
+    await fs.writeFile(REGISTRY_CONFIG.LANCE_CACHE_PATH, Buffer.from(buffer))
+
+    await importFromLance(REGISTRY_CONFIG.LANCE_CACHE_PATH, hash)
+    _vectorsAvailable = null // Reset cache — new import may change vector availability
+    log.info("imported registry from .lance archive")
+
+    // Clean up tar file
+    try { await fs.unlink(REGISTRY_CONFIG.LANCE_CACHE_PATH) } catch { /* ok */ }
+    return true
+  } catch (error) {
+    log.warn("lance archive import failed", { error: String(error) })
+    return false
+  }
+}
+
+/**
+ * Download YAML and import to LanceDB (fallback).
+ */
+async function downloadAndImportYAML(hash: string): Promise<Registry | null> {
+  try {
+    log.info("fetching registry YAML", { url: REGISTRY_CONFIG.REMOTE_URL })
     const response = await fetch(REGISTRY_CONFIG.REMOTE_URL, {
       headers: { "User-Agent": "opensploit-cli" },
-      signal: AbortSignal.timeout(30000), // 30 second timeout
+      signal: AbortSignal.timeout(30000),
     })
-
-    if (!response.ok) {
-      log.warn("failed to fetch registry", { status: response.status })
-      return null
-    }
+    if (!response.ok) return null
 
     const text = await response.text()
     const parsed = yaml.load(text)
@@ -235,131 +301,132 @@ async function fetchRemoteRegistry(): Promise<Registry | null> {
     // Save to disk cache
     await ensureCacheDir()
     await fs.writeFile(REGISTRY_CONFIG.CACHE_PATH, text, "utf-8")
-    log.info("registry cached to disk", { path: REGISTRY_CONFIG.CACHE_PATH })
+
+    // Import into LanceDB with FTS index (no vectors)
+    await importFromYAML(validated.tools, hash)
+    _vectorsAvailable = null // Reset cache — YAML import has no vectors
+    log.info("imported registry from YAML fallback")
 
     return validated
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      log.warn("invalid registry format from remote", { errors: error.issues.slice(0, 3) })
-    } else {
-      log.warn("error fetching registry", { error: String(error) })
-    }
+    log.warn("YAML registry fetch/import failed", { error: String(error) })
     return null
   }
 }
 
-interface GetRegistryResult {
-  registry: Registry
-  cacheStatus: "fresh" | "stale" | "new"
-}
-
 /**
- * Sync registry data to LanceDB tools table (non-blocking).
- * Called after loading from YAML to keep LanceDB in sync.
+ * Load registry from LanceDB and reconstruct into Registry format.
  */
-async function syncToLanceDB(registry: Registry): Promise<void> {
+async function loadFromLanceDB(): Promise<{ registry: Registry; hash: string } | null> {
   try {
-    if (await toolsNeedSync(registry.version)) {
-      await importToolsFromRegistry(registry.tools, registry.version)
-      log.info("synced registry to LanceDB", { version: registry.version })
-    }
-  } catch (error) {
-    // Non-critical — LanceDB sync failure doesn't block tool search
-    log.warn("failed to sync registry to LanceDB", { error: String(error) })
-  }
-}
-
-/**
- * Try to load registry from LanceDB tools table.
- * Returns null if unavailable.
- */
-async function loadFromLanceDB(): Promise<Registry | null> {
-  try {
-    const result = await loadToolsFromLanceDB()
+    const result = await loadRegistry()
     if (!result) return null
 
-    // Reconstruct Registry format and validate
-    const parsed = { version: result.version, tools: result.tools }
+    // Version is not stored in LanceDB (only per-tool data is). Hardcoded
+    // to satisfy RegistrySchema. Version checking was replaced by hash-based
+    // freshness, so this value is unused for any logic.
+    const parsed = { version: "2.0", tools: result.tools }
     const validated = RegistrySchema.parse(parsed)
-    log.info("loaded registry from LanceDB", { version: validated.version })
-    return validated
+    log.info("loaded registry from LanceDB", { hash: result.hash.slice(0, 16) })
+    return { registry: validated, hash: result.hash }
   } catch (error) {
     log.debug("LanceDB registry load failed", { error: String(error) })
     return null
   }
 }
 
+interface GetRegistryResult {
+  registry: Registry
+  hash: string
+  cacheStatus: "fresh" | "stale" | "new"
+}
+
+/**
+ * Get the registry with hash-based freshness checking.
+ *
+ * Flow:
+ * 1. Memory cache (instant, within session)
+ * 2. Fetch remote hash (64 bytes, <100ms)
+ * 3. Compare to stored hash
+ * 4. Match → load from LanceDB (instant)
+ * 5. Mismatch → download .lance archive → importFromLance()
+ * 6. .lance fails → download YAML → importFromYAML()
+ * 7. All remote fail → use existing LanceDB or YAML disk cache
+ */
 async function getRegistry(): Promise<GetRegistryResult> {
   const now = Date.now()
 
-  // Check memory cache first (for performance within session)
+  // 1. Check memory cache (within-session performance)
   if (memoryCache && !isCacheStale(memoryCache.timestamp)) {
-    return { registry: memoryCache.registry, cacheStatus: "fresh" }
+    return { registry: memoryCache.registry, hash: memoryCache.hash, cacheStatus: "fresh" }
   }
 
-  // Try to fetch from remote (primary source)
-  const remote = await fetchRemoteRegistry()
-  if (remote) {
-    memoryCache = { registry: remote, timestamp: now }
-    // Sync to LanceDB in background (non-blocking)
-    syncToLanceDB(remote)
-    return { registry: remote, cacheStatus: "new" }
+  // 2. Fetch remote hash (tiny, fast)
+  const remoteHash = await fetchRemoteHash()
+
+  if (remoteHash) {
+    // 3. Compare to stored hash
+    const isStale = await needsUpdate(remoteHash)
+
+    if (!isStale) {
+      // 4. Hash matches — load from LanceDB (instant, no download needed)
+      const lanceResult = await loadFromLanceDB()
+      if (lanceResult) {
+        memoryCache = { registry: lanceResult.registry, hash: lanceResult.hash, timestamp: now }
+        return { registry: lanceResult.registry, hash: lanceResult.hash, cacheStatus: "fresh" }
+      }
+    }
+
+    // 5. Hash mismatch or LanceDB empty — try downloading .lance archive
+    const lanceImported = await downloadAndImportLance(remoteHash)
+    if (lanceImported) {
+      const lanceResult = await loadFromLanceDB()
+      if (lanceResult) {
+        memoryCache = { registry: lanceResult.registry, hash: remoteHash, timestamp: now }
+        return { registry: lanceResult.registry, hash: remoteHash, cacheStatus: "new" }
+      }
+    }
+
+    // 6. .lance failed — fall back to YAML download
+    const yamlRegistry = await downloadAndImportYAML(remoteHash)
+    if (yamlRegistry) {
+      memoryCache = { registry: yamlRegistry, hash: remoteHash, timestamp: now }
+      return { registry: yamlRegistry, hash: remoteHash, cacheStatus: "new" }
+    }
   }
 
-  // Remote failed — try LanceDB (secondary source)
-  const lanceDBRegistry = await loadFromLanceDB()
-  if (lanceDBRegistry) {
-    memoryCache = { registry: lanceDBRegistry, timestamp: now }
-    return { registry: lanceDBRegistry, cacheStatus: "stale" }
+  // 7. All remote failed — try existing LanceDB (stale)
+  const staleResult = await loadFromLanceDB()
+  if (staleResult) {
+    log.warn("using stale LanceDB data, remote unavailable")
+    memoryCache = { registry: staleResult.registry, hash: staleResult.hash, timestamp: now }
+    return { registry: staleResult.registry, hash: staleResult.hash, cacheStatus: "stale" }
   }
 
-  // LanceDB failed — try disk cache (fallback)
-  const cacheTimestamp = await getCacheTimestamp()
-  const diskCache = cacheTimestamp ? await loadCacheFromDisk() : null
+  // Final fallback — disk cache YAML
+  const diskCache = await loadCacheFromDisk()
   if (diskCache) {
     log.warn("using YAML disk cache, remote and LanceDB both unavailable")
-    memoryCache = { registry: diskCache, timestamp: cacheTimestamp! }
-    // Try to sync to LanceDB from disk cache
-    syncToLanceDB(diskCache)
-    return { registry: diskCache, cacheStatus: "stale" }
+    const fallbackHash = await computeHash(JSON.stringify(diskCache))
+    // Import to LanceDB so search works
+    try {
+      await importFromYAML(diskCache.tools, fallbackHash)
+      _vectorsAvailable = null
+    } catch { /* non-critical */ }
+    memoryCache = { registry: diskCache, hash: fallbackHash, timestamp: now }
+    return { registry: diskCache, hash: fallbackHash, cacheStatus: "stale" }
   }
 
-  // No registry available
   throw new Error("Registry unavailable. Check network connection and try 'opensploit update'.")
 }
 
 // =============================================================================
-// Search Logic
+// Routing Bonus / Penalty Functions (kept from original)
 // =============================================================================
-
-function buildSearchText(tool: RegistryTool): string {
-  // Note: use_for and triggers are handled separately in bonus functions
-  // to give them appropriate weighting (see Doc 22 §Part 1)
-  const parts: string[] = [
-    tool.name,
-    tool.description,
-    ...(tool.capabilities || []),
-  ]
-
-  // Add method names and descriptions
-  if (tool.methods) {
-    for (const [methodName, method] of Object.entries(tool.methods)) {
-      parts.push(methodName)
-      parts.push(method.description)
-      if (method.when_to_use) {
-        parts.push(method.when_to_use)
-      }
-    }
-  }
-
-  return parts.join(" ").toLowerCase()
-}
 
 /**
  * Bug Fix 1: Triggers should be matched as regex patterns
  * Doc 22 §Part 1, Bug 1 (lines 274-290)
- *
- * Example: trigger "CVE-\\d{4}-\\d+" should match query "CVE-2024-48990"
  */
 function calculateTriggerBonus(query: string, tool: RegistryTool): number {
   let bonus = 0
@@ -369,13 +436,10 @@ function calculateTriggerBonus(query: string, tool: RegistryTool): number {
     try {
       const regex = new RegExp(trigger, "i")
       if (regex.test(query)) {
-        // Strong bonus for trigger match - must overcome keyword flooding
-        // (e.g., exploit-runner has "exploit" 13x in text = 39+ keyword points)
         bonus += 35
         log.debug("trigger regex matched", { tool: tool.name, trigger, query })
       }
     } catch {
-      // Invalid regex pattern - skip silently
       log.debug("invalid trigger regex", { tool: tool.name, trigger })
     }
   }
@@ -386,9 +450,6 @@ function calculateTriggerBonus(query: string, tool: RegistryTool): number {
 /**
  * Bug Fix 2: use_for should receive bonus weighting
  * Doc 22 §Part 1, Bug 2 (lines 292-309)
- *
- * use_for contains high-signal phrases like "find exploit for CVE"
- * These should be weighted higher than general description matches
  */
 function calculateUseForBonus(query: string, tool: RegistryTool): number {
   let bonus = 0
@@ -398,27 +459,18 @@ function calculateUseForBonus(query: string, tool: RegistryTool): number {
   for (const useFor of useForList) {
     const useForLower = useFor.toLowerCase()
 
-    // Exact phrase match in query
     if (queryLower.includes(useForLower)) {
       bonus += 8
-      log.debug("use_for exact match", { tool: tool.name, useFor, query })
-    }
-    // Reverse: query is contained in use_for (partial match)
-    else if (useForLower.includes(queryLower)) {
+    } else if (useForLower.includes(queryLower)) {
       bonus += 5
-      log.debug("use_for partial match", { tool: tool.name, useFor, query })
-    }
-    // Word overlap check (with partial matching for compound terms like "CVE-2024-48990")
-    else {
+    } else {
       const useForWords = useForLower.split(/\s+/)
       const queryWords = queryLower.split(/\s+/)
-      // Match words that start with or are contained in each other
-      // This handles "cve" matching "cve-2024-48990"
       const overlap = useForWords.filter((w) =>
         queryWords.some((qw) => qw.startsWith(w) || w.startsWith(qw) || qw === w)
       )
       if (overlap.length >= 2) {
-        bonus += 3 // Multiple word overlap
+        bonus += 3
       }
     }
   }
@@ -429,9 +481,6 @@ function calculateUseForBonus(query: string, tool: RegistryTool): number {
 /**
  * Bug Fix 3: never_use_for should penalize score
  * Doc 22 §Part 1, Bug 3 (lines 311-326)
- *
- * If a tool explicitly says "don't use for X" and query is about X,
- * the tool should be ranked lower, not just warned about
  */
 function calculateNeverUseForPenalty(query: string, tool: RegistryTool): number {
   let penalty = 0
@@ -441,39 +490,11 @@ function calculateNeverUseForPenalty(query: string, tool: RegistryTool): number 
   for (const pattern of neverUseFor) {
     const task = typeof pattern === "string" ? pattern : pattern.task
     if (task && queryLower.includes(task.toLowerCase())) {
-      penalty -= 15 // Heavy penalty
-      log.debug("never_use_for penalty applied", { tool: tool.name, task, query })
+      penalty -= 15
     }
   }
 
   return penalty
-}
-
-function countKeywordMatches(query: string, searchText: string): number {
-  const queryWords = query
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((w) => w.length > 1)
-  let score = 0
-
-  for (const word of queryWords) {
-    // Exact word match gets higher score
-    const regex = new RegExp(`\\b${word}\\b`, "g")
-    const exactMatches = (searchText.match(regex) || []).length
-    score += exactMatches * 3
-
-    // Partial match (word contained in text)
-    if (searchText.includes(word)) {
-      score += 1
-    }
-  }
-
-  // Bonus for query appearing as a phrase
-  if (searchText.includes(query.toLowerCase())) {
-    score += 5
-  }
-
-  return score
 }
 
 function checkAntiPatterns(query: string, tool: RegistryTool): string | undefined {
@@ -507,12 +528,10 @@ function normalizeNeverUseFor(entries: Array<string | NeverUseForEntry>): NeverU
 function extractSuggestedAlternatives(tool: RegistryTool): string[] {
   const alternatives = new Set<string>()
 
-  // From prefer_over
   for (const alt of tool.routing?.prefer_over || []) {
     alternatives.add(alt)
   }
 
-  // From never_use_for.use_instead
   for (const entry of tool.routing?.never_use_for || []) {
     if (typeof entry !== "string" && entry.use_instead) {
       const useInstead = Array.isArray(entry.use_instead) ? entry.use_instead : [entry.use_instead]
@@ -561,6 +580,10 @@ function formatToolResult(toolId: string, tool: RegistryTool, warning?: string):
   }
 }
 
+// =============================================================================
+// Search Logic — LanceDB Hybrid Search
+// =============================================================================
+
 interface LocalScoredTool {
   toolId: string
   tool: RegistryTool
@@ -571,11 +594,206 @@ interface LocalScoredTool {
 interface SearchToolsResult {
   results: ToolResult[]
   warnings: string[]
-  /** Scored results for experience tracking */
   scoredResults: Array<{ tool: string; score: number; description: string }>
 }
 
-function searchTools(
+/**
+ * Search tools using LanceDB hybrid search (FTS + vector via RRF).
+ *
+ * When vectors are available (from .lance archive):
+ *   → FTS (BM25) + vector (cosine) combined via RRF reranker
+ * When no vectors (YAML import):
+ *   → FTS-only search
+ * Routing bonuses/penalties applied on top of LanceDB _score.
+ */
+async function searchToolsLance(
+  registry: Registry,
+  query: string,
+  phase?: string,
+  capability?: string,
+  limit: number = 5
+): Promise<SearchToolsResult> {
+  const warnings: string[] = []
+
+  try {
+    const db = await getConnection()
+    const tables = await db.tableNames()
+
+    if (!tables.includes(TOOLS_TABLE_NAME)) {
+      // No tools table yet — fall back to in-memory search
+      return searchToolsInMemory(registry, query, phase, capability, limit)
+    }
+
+    const table = await db.openTable(TOOLS_TABLE_NAME)
+
+    // Use cached value (reset on registry import) to avoid per-search table query
+    if (_vectorsAvailable === null) {
+      _vectorsAvailable = await hasVectors()
+    }
+    const vectorsAvailable = _vectorsAvailable
+
+    let results: any[]
+
+    if (vectorsAvailable) {
+      // Try hybrid search: FTS + vector combined via RRF
+      const embeddingService = getEmbeddingService()
+      const embedding = await embeddingService.embed(query)
+      const queryVector = embedding?.dense ?? null
+
+      if (queryVector) {
+        // Hybrid: FTS (BM25) + vector (cosine) combined via RRF
+        try {
+          const reranker = await lancedb.rerankers.RRFReranker.create()
+          results = await table
+            .query()
+            .nearestTo(new Float32Array(queryVector))
+            .fullTextSearch(query)
+            .rerank(reranker)
+            .select(["id", "name", "description", "search_text", "phases_json",
+                     "capabilities_json", "routing_json", "methods_json", "raw_json"])
+            .limit(limit * 4) // Over-fetch for post-filtering
+            .toArray()
+        } catch (error) {
+          // Hybrid search failed (e.g. no FTS index) — fall back to vector only
+          log.warn("hybrid search failed, trying vector-only", { error: String(error) })
+          results = await table
+            .search(queryVector)
+            .select(["id", "name", "description", "search_text", "phases_json",
+                     "capabilities_json", "routing_json", "methods_json", "raw_json"])
+            .limit(limit * 4)
+            .toArray()
+        }
+      } else {
+        // Embedding unavailable — FTS only
+        results = await searchFTSOnly(table, query, limit * 4)
+      }
+    } else {
+      // No vectors (YAML import) — FTS only
+      results = await searchFTSOnly(table, query, limit * 4)
+    }
+
+    // Apply routing bonuses on top of LanceDB scores
+    const scored = applyRoutingBonuses(results, registry, query, phase, capability, warnings)
+
+    // Sort by combined score
+    scored.sort((a, b) => b.score - a.score)
+
+    // Take top results
+    const topResults = scored.slice(0, limit)
+
+    log.debug("lance search scores", {
+      query,
+      phase,
+      hybrid: vectorsAvailable,
+      topResults: topResults.slice(0, 5).map((t) => ({ tool: t.toolId, score: t.score })),
+    })
+
+    const formattedResults = topResults.map((st) => formatToolResult(st.toolId, st.tool, st.warning))
+    const scoredResults = topResults.map((st) => ({
+      tool: st.toolId,
+      score: st.score,
+      description: st.tool.description,
+    }))
+
+    return { results: formattedResults, warnings: [...new Set(warnings)], scoredResults }
+  } catch (error) {
+    log.warn("LanceDB search failed, falling back to in-memory", { error: String(error) })
+    return searchToolsInMemory(registry, query, phase, capability, limit)
+  }
+}
+
+/**
+ * FTS-only search on the tools table.
+ */
+async function searchFTSOnly(table: lancedb.Table, query: string, limit: number): Promise<any[]> {
+  try {
+    return await table
+      .search(query, "fts")
+      .select(["id", "name", "description", "search_text", "phases_json",
+               "capabilities_json", "routing_json", "methods_json", "raw_json"])
+      .limit(limit)
+      .toArray()
+  } catch (error) {
+    // FTS index may not exist — fall back to full scan
+    log.warn("FTS search failed, using full scan", { error: String(error) })
+    return await table.query()
+      .select(["id", "name", "description", "search_text", "phases_json",
+               "capabilities_json", "routing_json", "methods_json", "raw_json"])
+      .limit(10000)
+      .toArray()
+  }
+}
+
+/**
+ * Apply routing bonuses/penalties on LanceDB results.
+ */
+function applyRoutingBonuses(
+  results: any[],
+  registry: Registry,
+  query: string,
+  phase: string | undefined,
+  capability: string | undefined,
+  warnings: string[]
+): LocalScoredTool[] {
+  const scored: LocalScoredTool[] = []
+
+  for (const row of results) {
+    const toolId = row.id as string
+    const tool = registry.tools[toolId]
+    if (!tool) continue
+
+    // Capability filter (hard filter)
+    if (capability && !tool.capabilities?.includes(capability)) {
+      continue
+    }
+
+    // Base score from LanceDB (_score for FTS, _distance for vector)
+    let baseScore = 0
+    if (row._score != null) {
+      baseScore = row._score
+    } else if (row._distance != null) {
+      // Convert distance to similarity (lower distance = higher score)
+      baseScore = 1 / (1 + row._distance)
+    } else {
+      // No score from LanceDB — give a small base for full-scan results
+      baseScore = 0.1
+    }
+
+    // Normalize base score to a reasonable range for combining with bonuses
+    // LanceDB BM25 scores can vary widely; scale to ~0-50 range
+    const normalizedBase = Math.min(baseScore * 10, 50)
+
+    let score = normalizedBase
+
+    // Apply routing bonuses/penalties
+    score += calculateTriggerBonus(query, tool)
+    score += calculateUseForBonus(query, tool)
+    score += calculateNeverUseForPenalty(query, tool)
+
+    // Phase boost
+    if (phase && tool.phases?.includes(phase)) {
+      score += 5
+    }
+
+    // Anti-pattern warnings
+    const antiPatternWarning = checkAntiPatterns(query, tool)
+    if (antiPatternWarning) {
+      warnings.push(antiPatternWarning)
+    }
+
+    if (score > 0) {
+      scored.push({ toolId, tool, score, warning: antiPatternWarning })
+    }
+  }
+
+  return scored
+}
+
+/**
+ * In-memory fallback search (when LanceDB is completely unavailable).
+ * Uses the original keyword matching algorithm.
+ */
+function searchToolsInMemory(
   registry: Registry,
   query: string,
   phase?: string,
@@ -586,60 +804,46 @@ function searchTools(
   const warnings: string[] = []
 
   for (const [toolId, tool] of Object.entries(registry.tools)) {
-    // Capability filter (hard filter - capability is specific requirement)
     if (capability && !tool.capabilities?.includes(capability)) {
       continue
     }
 
-    // Base score: keyword matching
-    const searchText = buildSearchText(tool)
-    let score = countKeywordMatches(query, searchText)
+    // Simple keyword matching
+    const searchText = [
+      tool.name, tool.description,
+      ...(tool.capabilities || []),
+    ].join(" ").toLowerCase()
 
-    // Bug Fix 1: Trigger regex matching bonus
+    const queryWords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 1)
+    let score = 0
+    for (const word of queryWords) {
+      const regex = new RegExp(`\\b${word}\\b`, "g")
+      score += (searchText.match(regex) || []).length * 3
+      if (searchText.includes(word)) score += 1
+    }
+    if (searchText.includes(query.toLowerCase())) score += 5
+
+    // Routing bonuses
     score += calculateTriggerBonus(query, tool)
-
-    // Bug Fix 2: use_for phrase matching bonus
     score += calculateUseForBonus(query, tool)
-
-    // Bug Fix 3: never_use_for penalty
     score += calculateNeverUseForPenalty(query, tool)
 
-    // Bug Fix 4: Phase boost instead of filter
-    // Doc 22 §Part 1, Bug 4 (lines 328-335)
-    // Tools matching the requested phase get a bonus, but others are not excluded
-    if (phase) {
-      if (tool.phases?.includes(phase)) {
-        score += 5 // Bonus for phase match
-      }
-      // No 'continue' here - tools without phase match can still appear
+    if (phase && tool.phases?.includes(phase)) {
+      score += 5
     }
 
-    // Check anti-patterns (for warnings, penalty already applied above)
     const antiPatternWarning = checkAntiPatterns(query, tool)
-    if (antiPatternWarning) {
-      warnings.push(antiPatternWarning)
-    }
+    if (antiPatternWarning) warnings.push(antiPatternWarning)
 
-    // Include tools with positive score
     if (score > 0) {
       scoredTools.push({ toolId, tool, score, warning: antiPatternWarning })
     }
   }
 
-  // Sort by score descending
   scoredTools.sort((a, b) => b.score - a.score)
 
-  log.debug("search scores", {
-    query,
-    phase,
-    topResults: scoredTools.slice(0, 5).map((t) => ({ tool: t.toolId, score: t.score })),
-  })
-
-  // Format top results
   const topScoredTools = scoredTools.slice(0, limit)
   const results = topScoredTools.map((st) => formatToolResult(st.toolId, st.tool, st.warning))
-
-  // Build scored results for experience tracking
   const scoredResults = topScoredTools.map((st) => ({
     tool: st.toolId,
     score: st.score,
@@ -662,7 +866,7 @@ function formatOutput(result: ToolSearchResult): string {
   if (result.phase) lines.push(`**Phase Filter:** ${result.phase}`)
   if (result.capability) lines.push(`**Capability Filter:** ${result.capability}`)
   lines.push(`**Results:** ${result.results.length} tools found`)
-  lines.push(`**Registry Version:** ${result.registry_version}`)
+  lines.push(`**Registry Hash:** ${result.registry_hash.slice(0, 16)}...`)
   if (result.cache_status === "stale") {
     lines.push(`**Warning:** Using cached registry. Run 'opensploit update' to refresh.`)
   }
@@ -795,15 +999,13 @@ export const ToolRegistrySearchTool = Tool.define("tool_registry_search", {
 
     log.info("searching tool registry", { query, phase, capability, limit, explain })
 
-    // Get registry with caching
-    const { registry, cacheStatus } = await getRegistry()
+    // Get registry with hash-based freshness
+    const { registry, hash, cacheStatus } = await getRegistry()
 
-    // Search tools
-    const { results, warnings, scoredResults } = searchTools(registry, query, phase, capability, limit)
+    // Search tools via LanceDB hybrid search
+    const { results, warnings, scoredResults } = await searchToolsLance(registry, query, phase, capability, limit)
 
-    // Update tool context for experience tracking (Doc 22 §Agent Loop Integration)
-    // This records the search query and results so subsequent tool invocations
-    // can be attributed to this search for learning purposes
+    // Update tool context for experience tracking
     try {
       const searchResultsForContext: SearchResult[] = scoredResults.map((sr) => ({
         tool: sr.tool,
@@ -812,7 +1014,6 @@ export const ToolRegistrySearchTool = Tool.define("tool_registry_search", {
       }))
       updateSearchContext(ctx.sessionID, query, searchResultsForContext)
     } catch (error) {
-      // Don't fail the search if context update fails
       log.warn("failed to update search context", { error: String(error) })
     }
 
@@ -823,7 +1024,7 @@ export const ToolRegistrySearchTool = Tool.define("tool_registry_search", {
       capability,
       results,
       anti_pattern_warnings: warnings,
-      registry_version: registry.version,
+      registry_hash: hash,
       cache_status: cacheStatus,
     }
 
@@ -831,11 +1032,9 @@ export const ToolRegistrySearchTool = Tool.define("tool_registry_search", {
     let output = formatOutput(searchResult)
 
     // Phase 5: Unified Search with experiences and insights
-    // Convert tool results to ScoredTool format for unifiedSearch
     try {
       const toolContext = getToolContext(ctx.sessionID)
       const scoredToolsForUnified: ScoredTool[] = scoredResults.map((sr) => {
-        // Find the full tool result to get phases/capabilities/routing
         const fullResult = results.find((r) => r.tool === sr.tool)
         return {
           id: sr.tool,
@@ -854,23 +1053,19 @@ export const ToolRegistrySearchTool = Tool.define("tool_registry_search", {
         }
       })
 
-      // Build search context from tool context
       const searchContext: SearchContext = {
         phase: toolContext?.currentPhase ?? phase,
         toolsTried: toolContext?.toolsTried,
         recentSuccesses: toolContext?.recentSuccesses,
       }
 
-      // Run unified search to get experiences and insights
       const unifiedResult = await unifiedSearch(query, scoredToolsForUnified, searchContext, explain)
 
-      // Append experience/insight information to output
       const memoryOutput = formatUnifiedResults(unifiedResult)
       if (memoryOutput.trim()) {
         output += "\n" + memoryOutput
       }
     } catch (error) {
-      // Don't fail the search if unified search fails
       log.warn("unified search failed, returning tool-only results", { error: String(error) })
     }
 
@@ -882,7 +1077,7 @@ export const ToolRegistrySearchTool = Tool.define("tool_registry_search", {
         phase,
         capability,
         results_count: results.length,
-        registry_version: registry.version,
+        registry_hash: hash,
         cache_status: cacheStatus,
         warnings: warnings.length > 0 ? warnings : undefined,
       },

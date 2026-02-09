@@ -142,15 +142,10 @@ export async function initializeMemorySystem(): Promise<boolean> {
     await db.createEmptyTable("patterns", patternSchema)
   }
 
-  // Tools table is created/populated by tools.ts importFromRegistry()
+  // Tools table is created/populated by tools.ts importFromLance() or importFromYAML()
   // when the registry is first loaded. No empty table needed here
-  // since tools are always bulk-inserted from the YAML source.
-
-  // Create FTS indexes for hybrid search
-  // Doc 22 §Part 6 (lines 1809-1814)
-  // Note: FTS index creation on nested fields may require special handling
-  // For now, we'll skip FTS indexes and add them when we implement Phase 5 (Unified Search)
-  // The LanceDB API for FTS on struct fields needs investigation
+  // since tools are always bulk-inserted from the archive or YAML source.
+  // FTS indexes are created during import (see tools.ts).
 
   // Write metadata to mark as initialized
   await writeMetadata()
@@ -191,6 +186,16 @@ export async function getInsightsTable(): Promise<lancedb.Table> {
 export async function getPatternsTable(): Promise<lancedb.Table> {
   const db = await getConnection()
   return await db.openTable("patterns")
+}
+
+/**
+ * Get the tools table
+ *
+ * @throws Error if table doesn't exist (import tools first via importFromLance/importFromYAML)
+ */
+export async function getToolsTable(): Promise<lancedb.Table> {
+  const db = await getConnection()
+  return await db.openTable(TOOLS_TABLE_NAME)
 }
 
 // =============================================================================

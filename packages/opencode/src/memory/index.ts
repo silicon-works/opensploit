@@ -28,6 +28,7 @@ export {
   getExperiencesTable,
   getInsightsTable,
   getPatternsTable,
+  getToolsTable,
   getMemoryStatus,
   resetMemorySystem,
 } from "./database"
@@ -123,15 +124,17 @@ export {
   formatUnifiedResults,
 } from "./search"
 
-// Tool registry storage (plaintext in LanceDB)
+// Tool registry storage (LanceDB with hybrid search support)
 export {
   type ToolRow,
   toolSchema,
   TOOLS_TABLE_NAME,
-  importFromRegistry as importToolsFromRegistry,
+  importFromLance,
+  importFromYAML,
   loadRegistry as loadToolsFromLanceDB,
-  getStoredVersion as getToolsStoredVersion,
-  needsSync as toolsNeedSync,
+  getStoredHash,
+  needsUpdate as toolsNeedUpdate,
+  hasVectors as toolsHaveVectors,
 } from "./tools"
 
 // Insight extraction and management (Phase 6)
