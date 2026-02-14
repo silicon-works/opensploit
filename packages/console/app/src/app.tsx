@@ -19,8 +19,8 @@ export default function App() {
         <LanguageProvider>
           <I18nProvider>
             <MetaProvider>
-              <Title>opencode</Title>
-              <Meta name="description" content="OpenCode - The open source coding agent." />
+              <Title>OpenSploit</Title>
+              <Meta name="description" content="OpenSploit - The open source offensive security agent." />
               <Favicon />
               <Font />
               <Suspense>{props.children}</Suspense>

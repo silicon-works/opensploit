@@ -1,5 +1,4 @@
 ---
-import { Base64 } from "js-base64";
 import Default from '@astrojs/starlight/components/Head.astro'
 import config from '../../config.mjs'
 
@@ -11,35 +10,13 @@ const {
     data: { title , description },
   },
 } = Astro.locals.starlightRoute;
-const isDocs = base === "" ? true : slug === base || slug.startsWith(`${base}/`)
 const t = Astro.locals.t as (key: string) => string
 const titleSuffix = t("app.head.titleSuffix")
 const shareSlug = base === "" ? "s" : `${base}/s`
 const isShare = slug === shareSlug || slug.startsWith(`${shareSlug}/`)
 const isHome = slug === "" || slug === base
 
-let encodedTitle = '';
-let ogImage = `${config.url}/social-share.png`;
-let truncatedDesc = '';
-
-if (isDocs) {
-  // Truncate to fit S3's max key size
-  encodedTitle = encodeURIComponent(
-    Base64.encode(
-      // Convert to ASCII
-      encodeURIComponent(
-        // Truncate to fit S3's max key size
-        title.substring(0, 700)
-      )
-    )
-  );
-
-  if (description) {
-    truncatedDesc = encodeURIComponent(description.substring(0, 400))
-  }
-
-  ogImage = `${config.socialCard}/opencode-docs/${encodedTitle}.png?desc=${truncatedDesc}`;
-}
+const ogImage = `${config.url}/social-share.png`
 ---
 
 { isHome && (

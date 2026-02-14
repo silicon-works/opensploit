@@ -1,1 +1,4 @@
-../../ui/src/assets/favicon/favicon-v3.svg
+<svg width="32" height="32" viewBox="0 0 240 300" xmlns="http://www.w3.org/2000/svg">
+  <path d="M0 0h240v300H0zM60 60v180h120V60z" fill="#6A0000" fill-rule="evenodd"/>
+  <rect x="60" y="120" width="120" height="120" fill="#E53935"/>
+</svg>

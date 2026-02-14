@@ -7,7 +7,52 @@ import theme from "toolbeam-docs-theme"
 import config from "./config.mjs"
 import { rehypeHeadingIds } from "@astrojs/markdown-remark"
 import rehypeAutolinkHeadings from "rehype-autolink-headings"
+import { rehypeBrand } from "./src/plugins/rehype-brand.ts"
+import { brandPostprocess } from "./src/plugins/brand-postprocess.ts"
 import { spawnSync } from "child_process"
+
+const REGISTRY_BASE =
+  "https://github.com/silicon-works/mcp-tools/releases/download/registry-latest"
+
+const REGISTRY_ROUTES = {
+  "/registry.yaml": { cache: 300, contentType: "text/yaml; charset=utf-8" },
+  "/registry.sha256": { cache: 60, contentType: "text/plain; charset=utf-8" },
+  "/registry.lance.tar.gz": { cache: 300, contentType: "application/octet-stream" },
+}
+
+/** Vite dev-server middleware — handles /registry.* before Astro's base-path routing */
+function registryProxy() {
+  return {
+    name: "registry-proxy",
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const entry = REGISTRY_ROUTES[req.url]
+        if (!entry) return next()
+
+        try {
+          const filename = req.url.slice(1)
+          const upstream = await fetch(`${REGISTRY_BASE}/${filename}`, { redirect: "follow" })
+          if (!upstream.ok) {
+            res.writeHead(upstream.status, { "content-type": "text/plain" })
+            res.end("upstream error")
+            return
+          }
+          res.writeHead(200, {
+            "content-type": entry.contentType,
+            "cache-control": `public, max-age=${entry.cache}`,
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "GET, HEAD, OPTIONS",
+          })
+          const body = Buffer.from(await upstream.arrayBuffer())
+          res.end(body)
+        } catch (err) {
+          res.writeHead(502, { "content-type": "text/plain" })
+          res.end("proxy error")
+        }
+      })
+    },
+  }
+}
 
 // https://astro.build/config
 export default defineConfig({
@@ -23,15 +68,19 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
   },
+  vite: {
+    plugins: [registryProxy()],
+  },
   markdown: {
-    rehypePlugins: [rehypeHeadingIds, [rehypeAutolinkHeadings, { behavior: "wrap" }]],
+    rehypePlugins: [rehypeHeadingIds, [rehypeAutolinkHeadings, { behavior: "wrap" }], rehypeBrand],
   },
   build: {},
   integrations: [
     configSchema(),
+    brandPostprocess(),
     solidJs(),
     starlight({
-      title: "OpenCode",
+      title: "OpenSploit",
       defaultLocale: "root",
       locales: {
         root: {
@@ -131,16 +180,8 @@ export default defineConfig({
           tag: "link",
           attrs: {
             rel: "icon",
-            href: "/favicon-v3.ico",
-            sizes: "32x32",
-          },
-        },
-        {
-          tag: "link",
-          attrs: {
-            rel: "icon",
             type: "image/png",
-            href: "/favicon-96x96-v3.png",
+            href: "/docs/favicon-96x96-v3.png",
             sizes: "96x96",
           },
         },
@@ -148,7 +189,7 @@ export default defineConfig({
           tag: "link",
           attrs: {
             rel: "apple-touch-icon",
-            href: "/apple-touch-icon-v3.png",
+            href: "/docs/apple-touch-icon-v3.png",
             sizes: "180x180",
           },
         },
@@ -157,7 +198,6 @@ export default defineConfig({
       expressiveCode: { themes: ["github-light", "github-dark"] },
       social: [
         { icon: "github", label: "GitHub", href: config.github },
-        { icon: "discord", label: "Discord", href: config.discord },
       ],
       editLink: {
         baseUrl: `${config.github}/edit/dev/packages/web/`,
@@ -275,7 +315,6 @@ export default defineConfig({
         },
       ],
       components: {
-        Hero: "./src/components/Hero.astro",
         Head: "./src/components/Head.astro",
         Header: "./src/components/Header.astro",
         Footer: "./src/components/Footer.astro",

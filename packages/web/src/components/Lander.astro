@@ -20,7 +20,6 @@ const imageAttrs = {
 };
 
 const github = (config.social || []).filter(s => s.icon === 'github')[0];
-const discord = (config.social || []).filter(s => s.icon === 'discord')[0];
 const locale = Astro.currentLocale || 'root';
 const t = Astro.locals.t as (key: string) => string;
 const docsHref = getRelativeLocaleUrl(locale, "")
@@ -30,7 +29,7 @@ const docsGithubHref = getRelativeLocaleUrl(locale, "github")
 
 const command = "curl -fsSL"
 const protocol = "https://"
-const url = "opencode.ai/install"
+const url = "opensploit.ai/install"
 const bash = "| bash"
 
 let darkImage: ImageMetadata | undefined;
@@ -46,6 +45,17 @@ if (image) {
         rawHtml = image.html;
   }
 }
+
+const faqItems = [
+  { q: "What is OpenSploit?", a: "OpenSploit is an AI-powered autonomous penetration testing agent, built on OpenCode. It orchestrates 25+ security tools through intelligent automation, guiding you through reconnaissance, enumeration, exploitation, and reporting phases." },
+  { q: "How does it work?", a: "You describe your target and objectives in natural language. OpenSploit's AI agent selects appropriate tools, executes them in Docker containers, analyzes results, and adapts its strategy based on findings." },
+  { q: "Do I need security expertise?", a: "OpenSploit lowers the barrier to security testing, but understanding the basics helps. It's designed for security practitioners, developers learning security, and students in cybersecurity programs." },
+  { q: "What tools are included?", a: "25+ tools including nmap (scanning), sqlmap (SQL injection), ffuf (fuzzing), hydra (brute force), nuclei (vulnerability scanning), metasploit (exploitation), and more. Tools download on-demand when first used." },
+  { q: "Is it legal to use?", a: "OpenSploit is for authorized security testing only. You must have explicit written permission to test any target. Unauthorized testing is illegal. The tool includes safeguards against scanning forbidden targets." },
+  { q: "Does it support local LLMs?", a: "Yes. OpenSploit supports 75+ LLM providers including Ollama for fully local, offline operation. You can also use Claude, GPT, Gemini, or any compatible API." },
+  { q: "How much does it cost?", a: "OpenSploit is free and open source. You only pay for LLM API usage if you choose a cloud provider. Local models via Ollama are completely free." },
+  { q: "Is it open source?", a: "Yes. OpenSploit is a fork of OpenCode — MIT licensed and available on GitHub. Contributions are welcome." },
+];
 ---
 <div class="hero">
     <section class="top">
@@ -60,6 +70,7 @@ if (image) {
         {lightImage && <Image src={lightImage} {...imageAttrs} class="dark:sl-hidden" />}
       </div>
       <h1>{t('app.lander.hero.title')}</h1>
+      <p class="subtitle">AI-powered penetration testing. Free models included or connect any provider including Claude, GPT, Gemini, and local models via Ollama.</p>
     </section>
 
     <section class="cta">
@@ -79,14 +90,21 @@ if (image) {
       </div>
     </section>
 
+    <section class="metrics">
+      <div><strong>MIT</strong><span>Open Source</span></div>
+      <div><strong>25+</strong><span>Security Tools</span></div>
+      <div><strong>75+</strong><span>LLM Providers</span></div>
+      <div><strong>5</strong><span>Attack Phases</span></div>
+    </section>
+
     <section class="content">
+      <h2>What is OpenSploit?</h2>
       <ul>
-        <li><b>{t('app.lander.features.native_tui.title')}</b>: {t('app.lander.features.native_tui.description')}</li>
-        <li><b>{t('app.lander.features.lsp_enabled.title')}</b>: {t('app.lander.features.lsp_enabled.description')}</li>
-        <li><b>{t('app.lander.features.multi_session.title')}</b>: {t('app.lander.features.multi_session.description')}</li>
-        <li><b>{t('app.lander.features.shareable_links.title')}</b>: {t('app.lander.features.shareable_links.description')}</li>
-        <li><b>GitHub Copilot</b>: {t('app.lander.features.github_copilot.description')}</li>
-        <li><b>ChatGPT Plus/Pro</b>: {t('app.lander.features.chatgpt_plus_pro.description')}</li>
+        <li><b>{t('app.lander.features.phases.title')}</b>: {t('app.lander.features.phases.description')}</li>
+        <li><b>{t('app.lander.features.tools.title')}</b>: {t('app.lander.features.tools.description')}</li>
+        <li><b>{t('app.lander.features.discovery.title')}</b>: {t('app.lander.features.discovery.description')}</li>
+        <li><b>{t('app.lander.features.local.title')}</b>: {t('app.lander.features.local.description')}</li>
+        <li><b>{t('app.lander.features.containers.title')}</b>: {t('app.lander.features.containers.description')}</li>
         <li><b>{t('app.lander.features.use_any_model.title')}</b>: {t('app.lander.features.use_any_model.prefix')} <a href="https://models.dev">Models.dev</a>, {t('app.lander.features.use_any_model.suffix')}</li>
       </ul>
     </section>
@@ -94,9 +112,9 @@ if (image) {
     <section class="alternatives">
       <div class="col1">
         <h3>npm</h3>
-        <button class="command" data-command="npm install -g opencode-ai">
+        <button class="command" data-command="npm install -g opensploit">
           <code>
-            <span>npm install -g</span> <span class="highlight">opencode-ai</span>
+            <span>npm install -g</span> <span class="highlight">opensploit</span>
           </code>
           <span class="copy">
             <CopyIcon />
@@ -106,9 +124,9 @@ if (image) {
       </div>
       <div class="col2">
         <h3>Bun</h3>
-        <button class="command" data-command="bun install -g opencode-ai">
+        <button class="command" data-command="bun install -g opensploit">
           <code>
-            <span>bun install -g</span> <span class="highlight">opencode-ai</span>
+            <span>bun install -g</span> <span class="highlight">opensploit</span>
           </code>
           <span class="copy">
             <CopyIcon />
@@ -118,9 +136,9 @@ if (image) {
       </div>
       <div class="col3">
         <h3>Homebrew</h3>
-        <button class="command" data-command="brew install opencode">
+        <button class="command" data-command="brew install silicon-works/tap/opensploit">
           <code>
-            <span>brew install</span> <span class="highlight">opencode</span>
+            <span>brew install</span> <span class="highlight">silicon-works/tap/opensploit</span>
           </code>
           <span class="copy">
             <CopyIcon />
@@ -130,9 +148,9 @@ if (image) {
       </div>
       <div class="col4">
         <h3>Paru</h3>
-        <button class="command" data-command="paru -S opencode-bin">
+        <button class="command" data-command="paru -S opensploit-bin">
           <code>
-            <span>paru -S</span> <span class="highlight">opencode-bin</span>
+            <span>paru -S</span> <span class="highlight">opensploit-bin</span>
           </code>
           <span class="copy">
             <CopyIcon />
@@ -142,9 +160,9 @@ if (image) {
       </div>
       <div class="col4">
         <h3>Mise</h3>
-        <button class="command" data-command="mise use -g github:anomalyco/opencode">
+        <button class="command" data-command="mise use -g github:silicon-works/opensploit">
           <code>
-            <span>mise use -g</span> <span class="highlight">github:anomalyco/opencode</span>
+            <span>mise use -g</span> <span class="highlight">github:silicon-works/opensploit</span>
           </code>
           <span class="copy">
             <CopyIcon />
@@ -183,15 +201,32 @@ if (image) {
       </div>
     </section>
 
+    <section class="privacy">
+      <h2>Privacy First</h2>
+      <p>OpenSploit runs entirely on your machine. Your targets, findings, and session data never leave your system unless you explicitly choose to share them. No telemetry, no cloud dependencies for core functionality.</p>
+    </section>
+
+    <section class="faq">
+      <h2>Frequently Asked Questions</h2>
+      {faqItems.map((item) => (
+        <details>
+          <summary>{item.q}</summary>
+          <p>{item.a}</p>
+        </details>
+      ))}
+    </section>
+
+    <section class="disclaimer">
+      <p><strong>Authorized Use Only:</strong> OpenSploit is designed for authorized security testing. You must have explicit written permission before testing any system. Unauthorized access to computer systems is illegal. By using OpenSploit, you agree to use it responsibly and in compliance with all applicable laws.</p>
+    </section>
+
     <section class="footer">
       <div class="col1">
-        <a href={github.href} target="_blank" rel="noopener noreferrer">GitHub</a>
+        {github && <a href={github.href} target="_blank" rel="noopener noreferrer">GitHub</a>}
+        <a href={docsHref}>Docs</a>
       </div>
       <div class="col2">
-        <a href={discord.href} target="_blank" rel="noopener noreferrer">Discord</a>
-      </div>
-      <div class="col3">
-      <span>&copy;2025 <a href="https://anoma.ly" target="_blank" rel="noopener noreferrer">Anomaly Innovations</a></span>
+        <span>&copy; 2026 Silicon Works Ltd</span>
       </div>
     </section>
 </div>
@@ -223,6 +258,14 @@ section.top {
     font-size: var(--heading-font-size);
     line-height: 1.25;
     text-transform: uppercase;
+  }
+
+  .subtitle {
+    margin-top: 0.75rem;
+    color: var(--sl-color-text-secondary);
+    font-size: 1rem;
+    line-height: 1.6;
+    max-width: 42rem;
   }
 
   img {
@@ -338,9 +381,59 @@ section.cta {
   }
 }
 
+section.metrics {
+  border-top: 2px solid var(--sl-color-border);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+
+  @media (max-width: 30rem) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  & > div {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: var(--vertical-padding) 0.5rem;
+    text-align: center;
+
+    strong {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    span {
+      font-size: 0.8125rem;
+      color: var(--sl-color-text-dimmed);
+      text-transform: uppercase;
+    }
+  }
+
+  & > div + div {
+    border-left: 2px solid var(--sl-color-border);
+  }
+
+  @media (max-width: 30rem) {
+    & > div:nth-child(3) {
+      border-left: none;
+      border-top: 2px solid var(--sl-color-border);
+    }
+    & > div:nth-child(4) {
+      border-top: 2px solid var(--sl-color-border);
+    }
+  }
+}
+
 section.content {
   border-top: 2px solid var(--sl-color-border);
   padding: var(--padding);
+
+  h2 {
+    font-size: 1rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+  }
 
   ul {
     padding-left: 1rem;
@@ -640,6 +733,86 @@ section.alternatives {
   }
 }
 
+section.privacy {
+  border-top: 2px solid var(--sl-color-border);
+  padding: var(--padding);
+
+  h2 {
+    font-size: 1rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    margin-bottom: 0.75rem;
+  }
+
+  p {
+    color: var(--sl-color-text-secondary);
+    line-height: 1.6;
+  }
+}
+
+section.faq {
+  border-top: 2px solid var(--sl-color-border);
+  padding: var(--padding);
+
+  h2 {
+    font-size: 1rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+  }
+
+  details {
+    border-top: 1px solid var(--sl-color-border);
+
+    &:last-child {
+      border-bottom: 1px solid var(--sl-color-border);
+    }
+
+    summary {
+      cursor: pointer;
+      padding: 0.75rem 0;
+      font-weight: 500;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+
+      &::after {
+        content: "+";
+        font-size: 1.25rem;
+        color: var(--sl-color-text-dimmed);
+        transition: transform 0.2s;
+      }
+
+      &::-webkit-details-marker {
+        display: none;
+      }
+    }
+
+    &[open] summary::after {
+      content: "\2212";
+    }
+
+    p {
+      padding: 0 0 0.75rem;
+      color: var(--sl-color-text-secondary);
+      line-height: 1.6;
+    }
+  }
+}
+
+section.disclaimer {
+  border-top: 2px solid var(--sl-color-border);
+  padding: calc(var(--padding) / 2) var(--padding);
+  background: var(--sl-color-bg-nav);
+
+  p {
+    font-size: 0.75rem;
+    color: var(--sl-color-text-dimmed);
+    line-height: 1.5;
+  }
+}
+
 section.footer {
   border-top: 2px solid var(--sl-color-border);
   display: flex;
@@ -652,37 +825,25 @@ section.footer {
     padding: var(--vertical-padding) 0.5rem;
   }
 
+  & > div.col1 {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+  }
+
   & > div + div {
     border-left: 2px solid var(--sl-color-border);
   }
 
-  /* Below 800px: first two columns shrink to content, third expands */
-  @media (max-width: 50rem) {
-    & > div.col1,
-    & > div.col2 {
-      flex: 0 0 auto;
-      padding-left: calc(var(--padding) / 2);
-      padding-right: calc(var(--padding) / 2);
-    }
-
-    & > div.col3 {
-      flex: 1;
-    }
-  }
-
-  /* Mobile: third column on its own row */
   @media (max-width: 30rem) {
     flex-wrap: wrap;
 
-    & > div.col1,
-    & > div.col2 {
+    & > div.col1 {
       flex: 1;
     }
 
-    & > div.col3 {
-      flex: 1 0 100%;
-      border-left: none;
-      border-top: 2px solid var(--sl-color-border);
+    & > div.col2 {
+      flex: 1;
     }
   }
 }

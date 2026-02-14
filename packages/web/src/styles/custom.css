@@ -1,4 +1,9 @@
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
 :root {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --sl-color-bg: hsl(0, 20%, 99%);
   --sl-color-gray-5: hsl(0, 1%, 85%);
   --sl-nav-gap: 40px;
@@ -11,23 +16,34 @@
   --color-background-weak-hover: hsl(0, 8%, 94%);
   --color-background-strong: hsl(0, 5%, 12%);
   --color-background-strong-hover: hsl(0, 5%, 18%);
-  --color-background-interactive: hsl(62, 84%, 88%);
-  --color-background-interactive-weaker: hsl(64, 74%, 95%);
+  --color-background-interactive: hsl(0, 70%, 50%);
+  --color-background-interactive-weaker: hsl(0, 70%, 95%);
 
   --color-text: hsl(0, 1%, 39%);
   --color-text-weak: hsl(0, 1%, 60%);
-  --color-text-weaker: hsl(0, 3%, 88%);
+  --color-text-weaker: hsl(30, 2%, 81%);
   --color-text-strong: hsl(0, 5%, 12%);
   --color-text-inverted: hsl(0, 20%, 99%);
 
   --color-border: hsl(30, 2%, 81%);
-  --color-border-weak: hsl(0, 1%, 85%);
+  --color-border-weak: hsla(0, 100%, 3%, 0.12);
+
+  --color-background-interactive-weak: hsl(0, 70%, 95%);
 
   --color-icon: hsl(0, 1%, 55%);
 
-  /* For the share component */
+  /* Starlight overrides */
   --sl-color-bg-surface: var(--sl-color-bg-nav);
   --sl-color-divider: var(--sl-color-gray-5);
+  --sl-color-accent: hsl(0, 70%, 50%);
+  --sl-color-accent-low: hsl(0, 70%, 95%);
+  --sl-color-accent-high: hsl(0, 70%, 30%);
+}
+
+/* Red text selection */
+::selection {
+  background: var(--color-background-interactive);
+  color: var(--color-text-inverted);
 }
 
 body {
@@ -43,10 +59,12 @@ body {
 
     --color-background: hsl(0, 9%, 7%);
     --color-background-weak: hsl(0, 6%, 10%);
+    --color-background-weak-hover: hsl(0, 6%, 15%);
     --color-background-strong: hsl(0, 15%, 94%);
     --color-background-strong-hover: hsl(0, 15%, 97%);
-    --color-background-interactive: hsl(62, 100%, 90%);
-    --color-background-interactive-weaker: hsl(60, 20%, 8%);
+    --color-background-interactive: hsl(0, 70%, 55%);
+    --color-background-interactive-weaker: hsl(0, 50%, 12%);
+    --color-background-interactive-weak: hsl(0, 50%, 12%);
 
     --color-text: hsl(0, 4%, 71%);
     --color-text-weak: hsl(0, 2%, 49%);
@@ -58,6 +76,10 @@ body {
     --color-border-weak: hsl(0, 4%, 23%);
 
     --color-icon: hsl(10, 3%, 43%);
+
+    --sl-color-accent: hsl(0, 70%, 55%);
+    --sl-color-accent-low: hsl(0, 50%, 12%);
+    --sl-color-accent-high: hsl(0, 70%, 75%);
   }
 }
 
@@ -113,6 +135,11 @@ body > .page > header a.site-title img {
 
 a {
   color: var(--color-text-strong) !important;
+  transition: color 0.15s ease;
+}
+
+.sl-markdown-content a:hover {
+  color: var(--color-background-interactive) !important;
 }
 
 .page-description {
@@ -137,13 +164,13 @@ a {
 }
 
 a[aria-current="page"] {
-  border-left: 2px solid var(--color-background-strong);
-  background: var(--color-background-weak) !important;
+  border-left: 2px solid var(--color-background-interactive);
+  background: var(--color-background-interactive-weak) !important;
   font-weight: 600 !important;
 }
 
 ul.top-level a[aria-current="page"] > span {
-  color: var(--color-text-strong) !important;
+  color: var(--color-background-interactive) !important;
 }
 
 #starlight__sidebar > div > sl-sidebar-state-persist > ul > li > details > summary {
@@ -216,6 +243,10 @@ site-search > button span {
     margin-top: 0;
   }
 
+  .starlight-aside__icon {
+    color: inherit;
+  }
+
   @media (max-width: 768px) {
     flex-direction: column;
     gap: 6px;
@@ -274,15 +305,17 @@ ol {
 }
 
 .sl-markdown-content .tab > [role="tab"][aria-selected="true"] {
-  border-color: var(--color-text-strong);
+  border-color: var(--color-background-interactive);
+  color: var(--color-background-interactive) !important;
 }
 
 .social-icons a svg {
   color: var(--color-text-weak) !important;
+  transition: color 0.15s ease;
 }
 
 .social-icons a svg:hover {
-  color: var(--color-text-strong) !important;
+  color: var(--color-background-interactive) !important;
 }
 
 body > .page > header,
@@ -367,8 +400,10 @@ h2#starlight__on-this-page {
 nav.sidebar ul.top-level > li > details > summary .group-label > span {
   margin-top: 24px !important;
   color: var(--color-text-strong) !important;
-  text-transform: none !important;
+  text-transform: uppercase !important;
   font-weight: 500 !important;
+  font-size: 11px !important;
+  letter-spacing: 0.08em !important;
 }
 
 .content-panel {
@@ -381,11 +416,12 @@ nav.sidebar ul.top-level > li > details > summary .group-label > span {
 
 .expressive-code {
   margin: 0.75rem 0 3rem 0 !important;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 .expressive-code figure {
   background: var(--color-background-weak) !important;
+  border-radius: 8px !important;
 }
 
 .expressive-code .frame {
@@ -397,9 +433,80 @@ nav.sidebar ul.top-level > li > details > summary .group-label > span {
   .shiki span {
     color: var(--shiki-dark) !important;
     background-color: var(--shiki-dark-bg) !important;
-    /* Optional, if you also want font styles */
     font-style: var(--shiki-dark-font-style) !important;
     font-weight: var(--shiki-dark-font-weight) !important;
     text-decoration: var(--shiki-dark-text-decoration) !important;
   }
+}
+
+/* Blockquote with red left border */
+.sl-markdown-content blockquote {
+  border-left: 3px solid var(--color-background-interactive) !important;
+  padding-left: 1rem;
+  margin: 1rem 0;
+  color: var(--color-text);
+}
+
+/* Admonition/aside styling with colored left borders */
+.starlight-aside {
+  border: none !important;
+  border-left: 3px solid !important;
+  border-radius: 0 !important;
+  padding: 0.75rem 1rem !important;
+  background: var(--color-background-weak) !important;
+}
+
+.starlight-aside--note {
+  border-left-color: hsl(210, 60%, 50%) !important;
+}
+
+.starlight-aside--tip {
+  border-left-color: hsl(150, 60%, 40%) !important;
+}
+
+.starlight-aside--caution {
+  border-left-color: hsl(40, 90%, 50%) !important;
+}
+
+.starlight-aside--danger {
+  border-left-color: var(--color-background-interactive) !important;
+}
+
+/* h2 with border-top separator (opensploit.ai pattern) */
+.sl-markdown-content h2 {
+  padding-top: 1.5rem !important;
+  border-top: 1px solid var(--color-border-weak) !important;
+  margin-top: 2rem !important;
+}
+
+.sl-markdown-content h2:first-child {
+  border-top: none !important;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Right sidebar (TOC) active item */
+nav.sidebar .sl-container ul li a[aria-current="true"],
+div.right-sidebar .sl-container ul li a[aria-current="true"] {
+  color: var(--color-background-interactive) !important;
+  opacity: 100%;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-weak);
 }
