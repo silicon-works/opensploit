@@ -57,6 +57,17 @@ export default defineConfig({
       cloudflare: {
         nodeCompat: true,
       },
+      routeRules: {
+        "/registry.yaml": {
+          redirect: { to: `${REGISTRY_BASE}/registry.yaml`, status: 302 },
+        },
+        "/registry.sha256": {
+          redirect: { to: `${REGISTRY_BASE}/registry.sha256`, status: 302 },
+        },
+        "/registry.lance.tar.gz": {
+          redirect: { to: `${REGISTRY_BASE}/registry.lance.tar.gz`, status: 302 },
+        },
+      },
     }),
   ],
   server: {

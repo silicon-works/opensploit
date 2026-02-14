@@ -71,5 +71,15 @@
   "share.match_other": "matchs",
   "share.result_one": "résultat",
   "share.result_other": "résultats",
-  "share.debug_key": "Clé"
+  "share.debug_key": "Clé",
+  "app.lander.features.phases.title": "Phase-based methodology",
+  "app.lander.features.phases.description": "Systematic approach through Reconnaissance, Enumeration, Exploitation, Post-Exploitation, and Reporting.",
+  "app.lander.features.tools.title": "25+ security tools",
+  "app.lander.features.tools.description": "nmap, sqlmap, ffuf, hydra, nuclei, metasploit, and more via MCP containers.",
+  "app.lander.features.discovery.title": "Intelligent tool discovery",
+  "app.lander.features.discovery.description": "Tool Registry RAG automatically finds the right tool for each task.",
+  "app.lander.features.local.title": "Local-first architecture",
+  "app.lander.features.local.description": "Your targets, findings, and session data never leave your machine.",
+  "app.lander.features.containers.title": "On-demand containers",
+  "app.lander.features.containers.description": "Tools download only when needed, minimizing disk usage."
 }
