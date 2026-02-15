@@ -59,13 +59,16 @@ export default defineConfig({
       },
       routeRules: {
         "/registry.yaml": {
-          redirect: { to: `${REGISTRY_BASE}/registry.yaml`, status: 302 },
+          proxy: `${REGISTRY_BASE}/registry.yaml`,
+          headers: { "content-type": "text/yaml; charset=utf-8", "cache-control": "public, max-age=300", "access-control-allow-origin": "*" },
         },
         "/registry.sha256": {
-          redirect: { to: `${REGISTRY_BASE}/registry.sha256`, status: 302 },
+          proxy: `${REGISTRY_BASE}/registry.sha256`,
+          headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=60", "access-control-allow-origin": "*" },
         },
         "/registry.lance.tar.gz": {
-          redirect: { to: `${REGISTRY_BASE}/registry.lance.tar.gz`, status: 302 },
+          proxy: `${REGISTRY_BASE}/registry.lance.tar.gz`,
+          headers: { "content-type": "application/octet-stream", "cache-control": "public, max-age=300", "access-control-allow-origin": "*" },
         },
       },
     }),
