@@ -57,20 +57,7 @@ export default defineConfig({
       cloudflare: {
         nodeCompat: true,
       },
-      routeRules: {
-        "/registry.yaml": {
-          proxy: `${REGISTRY_BASE}/registry.yaml`,
-          headers: { "content-type": "text/yaml; charset=utf-8", "cache-control": "public, max-age=300", "access-control-allow-origin": "*" },
-        },
-        "/registry.sha256": {
-          proxy: `${REGISTRY_BASE}/registry.sha256`,
-          headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=60", "access-control-allow-origin": "*" },
-        },
-        "/registry.lance.tar.gz": {
-          proxy: `${REGISTRY_BASE}/registry.lance.tar.gz`,
-          headers: { "content-type": "application/octet-stream", "cache-control": "public, max-age=300", "access-control-allow-origin": "*" },
-        },
-      },
+      // Registry routes handled by middleware (src/middleware.ts)
     }),
   ],
   server: {
