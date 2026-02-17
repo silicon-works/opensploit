@@ -27,6 +27,7 @@ import {
 } from "../memory/tools"
 import { getConnection } from "../memory/database"
 import { getEmbeddingService } from "../memory/embedding"
+import { sparseCosineSimilarity, parseSparseJson } from "../memory/sparse"
 
 const log = Log.create({ service: "tool.registry-search" })
 
@@ -159,6 +160,8 @@ interface ToolResult {
     prefer_over?: string[]
   }
   suggested_alternatives?: string[]
+  /** Top-scoring method for this query (method-level search) */
+  suggested_method?: string
   capabilities: string[]
   phases: string[]
   requirements?: {
@@ -178,6 +181,36 @@ interface ToolSearchResult {
   anti_pattern_warnings: string[]
   registry_hash: string
   cache_status?: "fresh" | "stale" | "new"
+}
+
+// =============================================================================
+// Method-Level Search Types
+// =============================================================================
+
+/** A scored method from LanceDB search */
+interface ScoredMethod {
+  toolId: string
+  methodName: string
+  methodDescription: string
+  whenToUse: string
+  /** Combined dense + sparse score */
+  score: number
+}
+
+/** A tool with method-level scoring */
+interface ToolWithMethods {
+  toolId: string
+  tool: RegistryTool
+  /** Best method score + routing adjustment */
+  score: number
+  /** Top-scoring method for this tool */
+  suggestedMethod: string
+  suggestedMethodDescription: string
+  /** All methods ranked by score */
+  rankedMethods: ScoredMethod[]
+  warning?: string
+  /** see_also tool IDs from registry */
+  seeAlso: string[]
 }
 
 // =============================================================================
@@ -580,6 +613,45 @@ function formatToolResult(toolId: string, tool: RegistryTool, warning?: string):
   }
 }
 
+/**
+ * Format tool result with suggested method ordering.
+ * Places the suggested method first in the methods list.
+ */
+function formatToolResultWithSuggestion(
+  toolId: string,
+  tool: RegistryTool,
+  suggestedMethod: string,
+  seeAlso: string[],
+  warning?: string
+): ToolResult {
+  const result = formatToolResult(toolId, tool, warning)
+
+  // Reorder methods so suggested is first
+  if (suggestedMethod && result.methods.length > 1) {
+    const suggestedIdx = result.methods.findIndex((m) => m.name === suggestedMethod)
+    if (suggestedIdx > 0) {
+      const [method] = result.methods.splice(suggestedIdx, 1)
+      result.methods.unshift(method)
+    }
+  }
+
+  // Mark suggested method
+  result.suggested_method = suggestedMethod
+
+  // Add see_also that aren't already in suggested_alternatives
+  if (seeAlso.length > 0) {
+    const existingAlts = new Set(result.suggested_alternatives ?? [])
+    for (const toolRef of seeAlso) {
+      if (!existingAlts.has(toolRef)) {
+        result.suggested_alternatives = result.suggested_alternatives ?? []
+        result.suggested_alternatives.push(toolRef)
+      }
+    }
+  }
+
+  return result
+}
+
 // =============================================================================
 // Search Logic — LanceDB Hybrid Search
 // =============================================================================
@@ -594,17 +666,20 @@ interface LocalScoredTool {
 interface SearchToolsResult {
   results: ToolResult[]
   warnings: string[]
-  scoredResults: Array<{ tool: string; score: number; description: string }>
+  scoredResults: Array<{ tool: string; score: number; description: string; suggestedMethod?: string }>
 }
 
 /**
- * Search tools using LanceDB hybrid search (FTS + vector via RRF).
+ * Search tools using LanceDB method-level search with sparse re-scoring.
  *
- * When vectors are available (from .lance archive):
- *   → FTS (BM25) + vector (cosine) combined via RRF reranker
- * When no vectors (YAML import):
- *   → FTS-only search
- * Routing bonuses/penalties applied on top of LanceDB _score.
+ * Flow:
+ * 1. Dense ANN retrieval on method_vector (over-fetch 8x for method grouping)
+ * 2. Sparse re-scoring: dense * 0.6 + sparse * 0.4 per method
+ * 3. Routing bonuses at tool level (trigger/use_for/never_use_for/phase)
+ * 4. Group by tool: tool score = best method score + routing adjustment
+ * 5. Return top N tools with suggested_method
+ *
+ * Falls back to FTS-only or in-memory when vectors unavailable.
  */
 async function searchToolsLance(
   registry: Registry,
@@ -620,79 +695,101 @@ async function searchToolsLance(
     const tables = await db.tableNames()
 
     if (!tables.includes(TOOLS_TABLE_NAME)) {
-      // No tools table yet — fall back to in-memory search
       return searchToolsInMemory(registry, query, phase, capability, limit)
     }
 
     const table = await db.openTable(TOOLS_TABLE_NAME)
 
-    // Use cached value (reset on registry import) to avoid per-search table query
+    // Use cached value (reset on registry import)
     if (_vectorsAvailable === null) {
       _vectorsAvailable = await hasVectors()
     }
     const vectorsAvailable = _vectorsAvailable
 
-    let results: any[]
+    let rawResults: any[]
+    let querySparse: Record<string, number> | null = null
 
     if (vectorsAvailable) {
-      // Try hybrid search: FTS + vector combined via RRF
       const embeddingService = getEmbeddingService()
       const embedding = await embeddingService.embed(query)
       const queryVector = embedding?.dense ?? null
+      querySparse = embedding?.sparse ?? null
 
       if (queryVector) {
-        // Hybrid: FTS (BM25) + vector (cosine) combined via RRF
+        // Dense ANN retrieval — over-fetch for method grouping
+        // Use method_vector column name for v7.0 schema
         try {
-          const reranker = await lancedb.rerankers.RRFReranker.create()
-          results = await table
-            .query()
-            .nearestTo(new Float32Array(queryVector))
-            .fullTextSearch(query)
-            .rerank(reranker)
-            .select(["id", "name", "description", "search_text", "phases_json",
-                     "capabilities_json", "routing_json", "methods_json", "raw_json"])
-            .limit(limit * 4) // Over-fetch for post-filtering
+          rawResults = await table
+            .search(queryVector, "method_vector")
+            .select(["id", "tool_id", "method_name", "tool_name", "tool_description",
+                     "method_description", "when_to_use", "phases_json",
+                     "capabilities_json", "routing_json", "methods_json", "raw_json",
+                     "see_also_json", "sparse_json"])
+            .limit(limit * 8)
             .toArray()
-        } catch (error) {
-          // Hybrid search failed (e.g. no FTS index) — fall back to vector only
-          log.warn("hybrid search failed, trying vector-only", { error: String(error) })
-          results = await table
-            .search(queryVector)
-            .select(["id", "name", "description", "search_text", "phases_json",
-                     "capabilities_json", "routing_json", "methods_json", "raw_json"])
-            .limit(limit * 4)
-            .toArray()
+        } catch {
+          // method_vector column may not exist (legacy v6.1) — try tool_vector
+          try {
+            rawResults = await table
+              .search(queryVector, "tool_vector")
+              .select(["id", "tool_id", "method_name", "tool_name", "tool_description",
+                       "method_description", "when_to_use", "phases_json",
+                       "capabilities_json", "routing_json", "methods_json", "raw_json",
+                       "see_also_json", "sparse_json"])
+              .limit(limit * 8)
+              .toArray()
+          } catch {
+            // Fall back to unqualified search (LanceDB picks the vector column)
+            rawResults = await table
+              .search(queryVector)
+              .select(["id", "tool_id", "method_name", "tool_name", "tool_description",
+                       "method_description", "when_to_use", "phases_json",
+                       "capabilities_json", "routing_json", "methods_json", "raw_json",
+                       "see_also_json", "sparse_json"])
+              .limit(limit * 8)
+              .toArray()
+          }
         }
       } else {
         // Embedding unavailable — FTS only
-        results = await searchFTSOnly(table, query, limit * 4)
+        log.warn("embedding unavailable for tool search, using FTS-only")
+        rawResults = await searchFTSOnly(table, query, limit * 8)
       }
     } else {
-      // No vectors (YAML import) — FTS only
-      results = await searchFTSOnly(table, query, limit * 4)
+      // No vectors (YAML import) — FTS only on method-level search_text
+      rawResults = await searchFTSOnly(table, query, limit * 8)
     }
 
-    // Apply routing bonuses on top of LanceDB scores
-    const scored = applyRoutingBonuses(results, registry, query, phase, capability, warnings)
+    // Score and group methods by tool
+    const toolsWithMethods = scoreAndGroupMethods(
+      rawResults, registry, query, phase, capability, querySparse, warnings
+    )
 
-    // Sort by combined score
-    scored.sort((a, b) => b.score - a.score)
+    // Sort by tool score
+    toolsWithMethods.sort((a, b) => b.score - a.score)
 
     // Take top results
-    const topResults = scored.slice(0, limit)
+    const topResults = toolsWithMethods.slice(0, limit)
 
-    log.debug("lance search scores", {
+    log.debug("method-level search scores", {
       query,
       phase,
       hybrid: vectorsAvailable,
-      topResults: topResults.slice(0, 5).map((t) => ({ tool: t.toolId, score: t.score })),
+      topResults: topResults.slice(0, 5).map((t) => ({
+        tool: t.toolId,
+        suggested: t.suggestedMethod,
+        score: t.score.toFixed(3),
+      })),
     })
 
-    const formattedResults = topResults.map((st) => formatToolResult(st.toolId, st.tool, st.warning))
-    const scoredResults = topResults.map((st) => ({
-      tool: st.toolId,
-      score: st.score,
-      description: st.tool.description,
+    const formattedResults = topResults.map((twm) =>
+      formatToolResultWithSuggestion(twm.toolId, twm.tool, twm.suggestedMethod, twm.seeAlso, twm.warning)
+    )
+    const scoredResults = topResults.map((twm) => ({
+      tool: twm.toolId,
+      score: twm.score,
+      description: twm.tool.description,
+      suggestedMethod: twm.suggestedMethod,
     }))
 
     return { results: formattedResults, warnings: [...new Set(warnings)], scoredResults }
@@ -703,90 +800,161 @@ async function searchToolsLance(
 }
 
 /**
- * FTS-only search on the tools table.
+ * Score method-level results and group by tool.
+ *
+ * For each method row:
+ * 1. Compute combined score: dense * 0.6 + sparse * 0.4
+ * 2. Apply routing bonuses (once per tool, shared across methods)
+ * 3. Group methods by tool_id
+ * 4. Tool score = best method combined score + routing adjustment
+ */
+function scoreAndGroupMethods(
+  results: any[],
+  registry: Registry,
+  query: string,
+  phase: string | undefined,
+  capability: string | undefined,
+  querySparse: Record<string, number> | null,
+  warnings: string[]
+): ToolWithMethods[] {
+  // Group method rows by tool_id
+  const toolGroups = new Map<string, {
+    methods: ScoredMethod[]
+    tool: RegistryTool
+    routing: number
+    warning?: string
+    seeAlso: string[]
+  }>()
+
+  for (const row of results) {
+    // Method-level rows have tool_id; legacy tool-level rows use id
+    const toolId = (row.tool_id ?? row.id) as string
+    const methodName = (row.method_name ?? "default") as string
+    const tool = registry.tools[toolId]
+    if (!tool) continue
+
+    // Capability filter
+    if (capability && !tool.capabilities?.includes(capability)) continue
+
+    // Dense score from LanceDB
+    let denseScore = 0
+    if (row._distance != null) {
+      // Vector distance → similarity (cosine: lower = more similar)
+      denseScore = 1 / (1 + row._distance)
+    } else if (row._score != null) {
+      // FTS BM25 score — normalize to 0-1 range
+      denseScore = Math.min(row._score / 20, 1)
+    } else {
+      denseScore = 0.05
+    }
+
+    // Sparse re-scoring
+    let sparseScore = 0
+    if (querySparse && row.sparse_json) {
+      const docSparse = parseSparseJson(row.sparse_json as string)
+      sparseScore = sparseCosineSimilarity(querySparse, docSparse)
+    }
+
+    // Combined method score: dense * 0.6 + sparse * 0.4 (BGE-M3 paper default)
+    const methodScore = querySparse
+      ? (denseScore * 0.6 + sparseScore * 0.4)
+      : denseScore
+
+    const method: ScoredMethod = {
+      toolId,
+      methodName,
+      methodDescription: (row.method_description ?? row.description ?? "") as string,
+      whenToUse: (row.when_to_use ?? "") as string,
+      score: methodScore,
+    }
+
+    if (!toolGroups.has(toolId)) {
+      // Compute routing bonuses once per tool
+      const triggerBonus = calculateTriggerBonus(query, tool)
+      const useForBonus = calculateUseForBonus(query, tool)
+      const neverUseForPenalty = calculateNeverUseForPenalty(query, tool)
+      const phaseBonus = (phase && tool.phases?.includes(phase)) ? 0.15 : 0
+
+      // Normalize bonuses to 0-1 range instead of raw +35/-15
+      const routingAdjustment = Math.min(
+        (triggerBonus / 35 * 0.3) + (useForBonus / 8 * 0.15) + (neverUseForPenalty / 15 * 0.2) + phaseBonus,
+        0.5
+      )
+
+      const antiPatternWarning = checkAntiPatterns(query, tool)
+      if (antiPatternWarning) warnings.push(antiPatternWarning)
+
+      // Parse see_also from row or tool
+      let seeAlso: string[] = []
+      try {
+        if (row.see_also_json) {
+          seeAlso = JSON.parse(row.see_also_json as string)
+        } else if ((tool as any).see_also) {
+          seeAlso = (tool as any).see_also
+        }
+      } catch { /* ignore */ }
+
+      toolGroups.set(toolId, {
+        methods: [],
+        tool,
+        routing: routingAdjustment,
+        warning: antiPatternWarning,
+        seeAlso,
+      })
+    }
+
+    toolGroups.get(toolId)!.methods.push(method)
+  }
+
+  // Build ToolWithMethods from groups
+  const toolResults: ToolWithMethods[] = []
+
+  for (const [toolId, group] of toolGroups) {
+    // Sort methods by score descending
+    group.methods.sort((a, b) => b.score - a.score)
+
+    const bestMethod = group.methods[0]
+    const toolScore = bestMethod.score + group.routing
+
+    if (toolScore > 0) {
+      toolResults.push({
+        toolId,
+        tool: group.tool,
+        score: toolScore,
+        suggestedMethod: bestMethod.methodName,
+        suggestedMethodDescription: bestMethod.methodDescription,
+        rankedMethods: group.methods,
+        warning: group.warning,
+        seeAlso: group.seeAlso,
+      })
+    }
+  }
+
+  return toolResults
+}
+
+/**
+ * FTS-only search on the method-level tools table.
  */
 async function searchFTSOnly(table: lancedb.Table, query: string, limit: number): Promise<any[]> {
+  const selectColumns = ["id", "tool_id", "method_name", "tool_name", "tool_description",
+                         "method_description", "when_to_use", "phases_json",
+                         "capabilities_json", "routing_json", "methods_json", "raw_json",
+                         "see_also_json", "sparse_json"]
   try {
     return await table
       .search(query, "fts")
-      .select(["id", "name", "description", "search_text", "phases_json",
-               "capabilities_json", "routing_json", "methods_json", "raw_json"])
+      .select(selectColumns)
       .limit(limit)
       .toArray()
   } catch (error) {
     // FTS index may not exist — fall back to full scan
     log.warn("FTS search failed, using full scan", { error: String(error) })
     return await table.query()
-      .select(["id", "name", "description", "search_text", "phases_json",
-               "capabilities_json", "routing_json", "methods_json", "raw_json"])
+      .select(selectColumns)
       .limit(10000)
       .toArray()
   }
-}
-
-/**
- * Apply routing bonuses/penalties on LanceDB results.
- */
-function applyRoutingBonuses(
-  results: any[],
-  registry: Registry,
-  query: string,
-  phase: string | undefined,
-  capability: string | undefined,
-  warnings: string[]
-): LocalScoredTool[] {
-  const scored: LocalScoredTool[] = []
-
-  for (const row of results) {
-    const toolId = row.id as string
-    const tool = registry.tools[toolId]
-    if (!tool) continue
-
-    // Capability filter (hard filter)
-    if (capability && !tool.capabilities?.includes(capability)) {
-      continue
-    }
-
-    // Base score from LanceDB (_score for FTS, _distance for vector)
-    let baseScore = 0
-    if (row._score != null) {
-      baseScore = row._score
-    } else if (row._distance != null) {
-      // Convert distance to similarity (lower distance = higher score)
-      baseScore = 1 / (1 + row._distance)
-    } else {
-      // No score from LanceDB — give a small base for full-scan results
-      baseScore = 0.1
-    }
-
-    // Normalize base score to a reasonable range for combining with bonuses
-    // LanceDB BM25 scores can vary widely; scale to ~0-50 range
-    const normalizedBase = Math.min(baseScore * 10, 50)
-
-    let score = normalizedBase
-
-    // Apply routing bonuses/penalties
-    score += calculateTriggerBonus(query, tool)
-    score += calculateUseForBonus(query, tool)
-    score += calculateNeverUseForPenalty(query, tool)
-
-    // Phase boost
-    if (phase && tool.phases?.includes(phase)) {
-      score += 5
-    }
-
-    // Anti-pattern warnings
-    const antiPatternWarning = checkAntiPatterns(query, tool)
-    if (antiPatternWarning) {
-      warnings.push(antiPatternWarning)
-    }
-
-    if (score > 0) {
-      scored.push({ toolId, tool, score, warning: antiPatternWarning })
-    }
-  }
-
-  return scored
 }
 
 /**
@@ -895,6 +1063,15 @@ function formatOutput(result: ToolSearchResult): string {
     lines.push(``)
     lines.push(`${tool.description}`)
     lines.push(``)
+
+    // Show suggested method prominently when available
+    if (tool.suggested_method && tool.suggested_method !== "default") {
+      const suggestedMethodDef = tool.methods.find((m) => m.name === tool.suggested_method)
+      if (suggestedMethodDef) {
+        lines.push(`> **Suggested method:** \`${tool.suggested_method}\` — ${suggestedMethodDef.description}`)
+        lines.push(``)
+      }
+    }
 
     if (tool.warning) {
       lines.push(`> **Warning:** ${tool.warning}`)
@@ -1043,6 +1220,7 @@ export const ToolRegistrySearchTool = Tool.define("tool_registry_search", {
           description: sr.description,
           phases: fullResult?.phases,
           capabilities: fullResult?.capabilities,
+          suggestedMethod: sr.suggestedMethod,
           routing: fullResult?.routing
             ? {
                 use_for: fullResult.routing.use_for,

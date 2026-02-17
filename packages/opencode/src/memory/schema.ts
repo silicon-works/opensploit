@@ -4,6 +4,7 @@
  * Implements Doc 22 §Part 6 (lines 1732-1778)
  * - Experience table: Records tool execution outcomes for learning
  * - Insight table: Extracted rules from experience patterns
+ * - MethodRow: Method-level tool rows for fine-grained search
  *
  * Apache Arrow schemas are used for LanceDB table creation.
  * TypeScript interfaces are used for type safety in the application.
@@ -73,6 +74,9 @@ export interface Experience {
   /** Embedding vector for semantic search (BGE-M3: 1024 dimensions) */
   vector: number[]
 
+  /** Sparse embedding as JSON Record<string, number> for hybrid scoring */
+  sparse_json?: string
+
   /** Whether this experience has been archived */
   archived?: boolean
 }
@@ -115,6 +119,9 @@ export interface Insight {
 
   /** Embedding vector for semantic search */
   vector: number[]
+
+  /** Sparse embedding as JSON Record<string, number> for hybrid scoring */
+  sparse_json?: string
 }
 
 /**
@@ -279,6 +286,7 @@ export const experienceSchema = new Schema([
   ),
   // Vector must be FixedSizeList for LanceDB vector search (BGE-M3: 1024 dims)
   new Field("vector", new FixedSizeList(1024, new Field("item", new Float32()))),
+  new Field("sparse_json", new Utf8(), true), // Sparse embedding as JSON Record<string, number>
   new Field("archived", new Bool(), true),
 ])
 
@@ -304,6 +312,7 @@ export const insightSchema = new Schema([
   ),
   // Vector must be FixedSizeList for LanceDB vector search (BGE-M3: 1024 dims)
   new Field("vector", new FixedSizeList(1024, new Field("item", new Float32()))),
+  new Field("sparse_json", new Utf8(), true), // Sparse embedding as JSON Record<string, number>
 ])
 
 /**
@@ -442,6 +451,7 @@ export function createExperience(
     id?: string
     timestamp?: string
     vector?: number[]
+    sparse_json?: string
   }
 ): Record<string, unknown> {
   return {
@@ -463,6 +473,7 @@ export function createExperience(
       target_characteristics: input.context.target_characteristics ?? [],
     },
     vector: input.vector ?? Array(1024).fill(0),
+    sparse_json: input.sparse_json ?? "",
     archived: input.archived ?? false,
   }
 }
@@ -481,6 +492,7 @@ export function createInsight(
     id?: string
     created_at?: string
     vector?: number[]
+    sparse_json?: string
   }
 ): Record<string, unknown> {
   return {
@@ -497,6 +509,7 @@ export function createInsight(
       when: input.suggestion.when,
     },
     vector: input.vector ?? Array(1024).fill(0),
+    sparse_json: input.sparse_json ?? "",
   }
 }
 
@@ -672,6 +685,59 @@ export function parsePattern(record: Record<string, unknown>): AttackPattern {
     metadata: record.metadata as AttackPattern["metadata"],
     vector: toArray<number>(record.vector),
   }
+}
+
+// =============================================================================
+// Method-Level Tool Row (Phase A1)
+// =============================================================================
+
+/**
+ * Method-level row in the tools table.
+ *
+ * Each row represents a single method within a tool. A tool with 9 methods
+ * produces 9 rows, each with method-specific search_text and method_vector.
+ * This enables fine-grained search that suggests the right method, not just
+ * the right tool.
+ */
+export interface MethodRow {
+  /** Composite ID: "tool_id:method_name" (e.g., "nmap:port_scan") */
+  id: string
+  /** Tool ID (e.g., "nmap") */
+  tool_id: string
+  /** Method name (e.g., "port_scan") */
+  method_name: string
+  /** Tool display name */
+  tool_name: string
+  /** Tool description */
+  tool_description: string
+  /** Method description */
+  method_description: string
+  /** Method when_to_use hint */
+  when_to_use: string
+  /** Focused method-level search text for FTS */
+  search_text: string
+  /** Tool phases as JSON array */
+  phases_json: string
+  /** Tool capabilities as JSON array */
+  capabilities_json: string
+  /** Tool routing as JSON object */
+  routing_json: string
+  /** ALL tool methods as JSON (for reconstruction) */
+  methods_json: string
+  /** Tool requirements as JSON (optional) */
+  requirements_json: string
+  /** Tool resources as JSON (optional) */
+  resources_json: string
+  /** Full tool entry as JSON (for loadRegistry reconstruction) */
+  raw_json: string
+  /** Tool see_also as JSON array of tool IDs */
+  see_also_json: string
+  /** SHA-256 content hash for freshness */
+  registry_hash: string
+  /** Dense BGE-M3 embedding (1024 dims), present when imported from .lance */
+  method_vector?: number[]
+  /** Sparse vector as JSON Record<string, number> */
+  sparse_json?: string
 }
 
 // =============================================================================

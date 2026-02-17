@@ -41,6 +41,7 @@ export {
   type AttackPhase,
   type AttackPattern,
   type MemoryMetadata,
+  type MethodRow,
   // Apache Arrow schemas
   experienceSchema,
   insightSchema,
@@ -105,7 +106,7 @@ export {
   getRecoveryPatterns,
 } from "./experience"
 
-// Unified search (Phase 5)
+// Unified search (Phase 5 + Cross-Table Architecture)
 export {
   type ScoredTool,
   type ScoredExperience,
@@ -114,6 +115,9 @@ export {
   type ResultType,
   type SearchContext,
   type UnifiedSearchResult,
+  type AnnotatedToolResult,
+  type ExperienceAnnotation,
+  type InsightAnnotation,
   searchExperiencesLance,
   searchInsightsLance,
   reciprocalRankFusion,
@@ -135,7 +139,17 @@ export {
   getStoredHash,
   needsUpdate as toolsNeedUpdate,
   hasVectors as toolsHaveVectors,
+  buildMethodSearchText,
 } from "./tools"
+
+// Sparse vector scoring utilities
+export {
+  type SparseVector,
+  sparseDotProduct,
+  sparseCosineSimilarity,
+  parseSparseJson,
+  serializeSparse,
+} from "./sparse"
 
 // Insight extraction and management (Phase 6)
 export {
@@ -166,6 +180,9 @@ export {
   patternReinforcesInsight,
   updateInsightConfidences,
   applyConfidenceDecay,
+  // Automated insight generation
+  autoConvertRecoveryToInsights,
+  preSeedInsightsFromRegistry,
   // Query functions
   getAllInsights,
   getInsightsForTool,

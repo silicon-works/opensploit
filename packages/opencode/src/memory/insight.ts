@@ -26,6 +26,7 @@ import { Log } from "../util/log"
 import { getExperiencesTable, getInsightsTable, initializeMemorySystem } from "./database"
 import { getEmbeddingService } from "./embedding"
 import { createInsight, type Experience, type Insight, VECTOR_DIMENSIONS } from "./schema"
+import { serializeSparse } from "./sparse"
 
 const log = Log.create({ service: "memory.insight" })
 
@@ -375,6 +376,7 @@ export async function importInsights(filepath: string): Promise<number> {
       },
       created_from: [],
       vector,
+      sparse_json: serializeSparse(embedding?.sparse ?? null),
     })
 
     await insTable.add([insight])
@@ -538,6 +540,7 @@ export async function updateInsightConfidences(lookbackDays: number = 7): Promis
           rule: insight.rule,
           suggestion: insight.suggestion,
           vector: insight.vector,
+          sparse_json: (insight as any).sparse_json ?? "",
         })
 
         try {
@@ -586,6 +589,13 @@ export async function applyConfidenceDecay(): Promise<DecayResult> {
   const now = Date.now()
 
   for (const insight of allInsights) {
+    // Skip canonical insights (from registry pre-seeding) — they don't decay
+    const createdFrom = toPlainArray(insight.created_from) ?? []
+    if (createdFrom.includes("canonical:registry")) {
+      result.unchanged++
+      continue
+    }
+
     // Get last update time
     const lastUpdate = insight.last_reinforced
       ? new Date(insight.last_reinforced).getTime()
@@ -629,6 +639,7 @@ export async function applyConfidenceDecay(): Promise<DecayResult> {
         rule: insight.rule,
         suggestion: insight.suggestion,
         vector: insight.vector,
+        sparse_json: (insight as any).sparse_json ?? "",
       })
 
       try {
@@ -721,4 +732,198 @@ export async function getPendingAnalysisFiles(): Promise<string[]> {
 export async function deletePendingAnalysisFile(filepath: string): Promise<void> {
   await fs.unlink(filepath)
   log.info("deleted pending analysis file", { filepath })
+}
+
+// =============================================================================
+// Automated Insight Generation (F4 + F5)
+// =============================================================================
+
+/**
+ * Auto-convert recovery patterns to insights.
+ *
+ * Queries experiences table for all recovery patterns where worked === true,
+ * groups by {failed_tool}→{recovery_tool}, filters to 2+ occurrences,
+ * and creates insights without needing an LLM.
+ *
+ * @returns Number of new insights created
+ */
+export async function autoConvertRecoveryToInsights(): Promise<number> {
+  await initializeMemorySystem()
+
+  const expTable = await getExperiencesTable()
+  const insTable = await getInsightsTable()
+
+  // Get all experiences with working recovery
+  const allExperiences = await expTable.query().toArray()
+  const recoveryExperiences = (allExperiences as unknown as Experience[]).filter(
+    (exp) => exp.outcome.recovery?.tool && exp.outcome.recovery?.worked === true
+  )
+
+  if (recoveryExperiences.length === 0) {
+    log.info("no recovery patterns to convert")
+    return 0
+  }
+
+  // Group by pattern key: {failed_tool}→{recovery_tool}
+  const patternGroups = new Map<string, { failedTool: string; recoveryTool: string; failureReasons: string[]; phases: string[]; count: number }>()
+
+  for (const exp of recoveryExperiences) {
+    const failedTool = String(exp.action.tool_selected)
+    const recoveryTool = String(exp.outcome.recovery!.tool)
+    const key = `${failedTool}→${recoveryTool}`
+
+    if (!patternGroups.has(key)) {
+      patternGroups.set(key, { failedTool, recoveryTool, failureReasons: [], phases: [], count: 0 })
+    }
+    const group = patternGroups.get(key)!
+    group.count++
+    if (exp.outcome.failure_reason) group.failureReasons.push(String(exp.outcome.failure_reason))
+    if (exp.context.phase) group.phases.push(String(exp.context.phase))
+  }
+
+  // Filter to 2+ occurrences
+  const qualifyingPatterns = Array.from(patternGroups.values()).filter(
+    (p) => p.count >= MIN_PATTERN_OCCURRENCES
+  )
+
+  // Check existing insights to avoid duplicates
+  const existingInsights = await insTable.query().toArray() as unknown as Insight[]
+  const existingKeys = new Set(existingInsights.map(
+    (ins) => `${ins.suggestion.over ?? ""}→${ins.suggestion.prefer}`
+  ))
+
+  const embeddingService = getEmbeddingService()
+  let created = 0
+
+  for (const pattern of qualifyingPatterns) {
+    const key = `${pattern.failedTool}→${pattern.recoveryTool}`
+    if (existingKeys.has(key)) continue
+
+    // Build insight rule
+    const failureReason = pattern.failureReasons[0] ?? "failure"
+    const phase = pattern.phases[0] ?? "any phase"
+    const rule = `When ${pattern.failedTool} fails with ${failureReason} during ${phase}, use ${pattern.recoveryTool} instead.`
+
+    // Embed the rule
+    const embedding = await embeddingService.embed(rule)
+
+    const insight = createInsight({
+      rule,
+      confidence: CONFIDENCE_INITIAL,
+      contradictions: 0,
+      suggestion: {
+        prefer: pattern.recoveryTool,
+        over: pattern.failedTool,
+        when: failureReason,
+      },
+      created_from: [`auto:recovery:${key}`],
+      vector: embedding?.dense ?? Array(VECTOR_DIMENSIONS).fill(0),
+      sparse_json: serializeSparse(embedding?.sparse ?? null),
+    })
+
+    await insTable.add([insight])
+    created++
+
+    log.info("auto-created insight from recovery", {
+      failedTool: pattern.failedTool,
+      recoveryTool: pattern.recoveryTool,
+      occurrences: pattern.count,
+    })
+  }
+
+  log.info("auto-convert recovery complete", { created, qualifying: qualifyingPatterns.length })
+  return created
+}
+
+/**
+ * Pre-seed insights from registry routing metadata.
+ *
+ * Called during initialization when insights table is empty.
+ * Creates insights from:
+ * - prefer_over entries (most reliable — both tool IDs explicit)
+ * - never_use_for entries (negative signals)
+ *
+ * Set confidence: 0.7 (expert knowledge).
+ * Marked with created_from: ["canonical:registry"] for decay exemption.
+ *
+ * @param registryTools - Record<toolId, toolData> from registry
+ * @returns Number of insights created
+ */
+export async function preSeedInsightsFromRegistry(
+  registryTools: Record<string, any>
+): Promise<number> {
+  await initializeMemorySystem()
+
+  const insTable = await getInsightsTable()
+  const embeddingService = getEmbeddingService()
+  let created = 0
+
+  for (const [toolId, tool] of Object.entries(registryTools)) {
+    const routing = tool.routing ?? {}
+
+    // prefer_over entries → "Prefer X over Y for Z"
+    for (const overTool of routing.prefer_over ?? []) {
+      const toolName = tool.name ?? toolId
+      const overToolName = registryTools[overTool]?.name ?? overTool
+      const capabilities = (tool.capabilities ?? []).join(", ") || tool.description?.slice(0, 50)
+
+      const rule = `Prefer ${toolName} over ${overToolName} for ${capabilities}`
+      const embedding = await embeddingService.embed(rule)
+
+      const insight = createInsight({
+        rule,
+        confidence: 0.7,
+        contradictions: 0,
+        suggestion: {
+          prefer: toolId,
+          over: overTool,
+          when: capabilities,
+        },
+        created_from: ["canonical:registry"],
+        vector: embedding?.dense ?? Array(VECTOR_DIMENSIONS).fill(0),
+        sparse_json: serializeSparse(embedding?.sparse ?? null),
+      })
+
+      await insTable.add([insight])
+      created++
+    }
+
+    // never_use_for entries → "Do not use X for Y"
+    for (const entry of routing.never_use_for ?? []) {
+      const task = typeof entry === "string" ? entry : entry.task
+      if (!task) continue
+
+      const toolName = tool.name ?? toolId
+      const rule = `Do not use ${toolName} for ${task}`
+
+      // Try to find the preferred alternative from use_instead or cross-reference
+      let preferTool: string | undefined
+      if (typeof entry !== "string" && entry.use_instead) {
+        const useInstead = Array.isArray(entry.use_instead) ? entry.use_instead[0] : entry.use_instead
+        if (useInstead) preferTool = useInstead
+      }
+
+      const embedding = await embeddingService.embed(rule)
+
+      const insight = createInsight({
+        rule,
+        confidence: 0.7,
+        contradictions: 0,
+        suggestion: {
+          prefer: preferTool ?? "",
+          over: toolId,
+          when: task,
+        },
+        created_from: ["canonical:registry"],
+        vector: embedding?.dense ?? Array(VECTOR_DIMENSIONS).fill(0),
+        sparse_json: serializeSparse(embedding?.sparse ?? null),
+      })
+
+      await insTable.add([insight])
+      created++
+    }
+  }
+
+  log.info("pre-seeded insights from registry", { created })
+  return created
 }

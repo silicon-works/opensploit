@@ -12,8 +12,11 @@ import * as lancedb from "@lancedb/lancedb"
 import * as fs from "fs/promises"
 import * as path from "path"
 import * as os from "os"
+import { Log } from "@/util/log"
 import { experienceSchema, insightSchema, patternSchema, type MemoryMetadata } from "./schema"
 import { toolSchema, TOOLS_TABLE_NAME } from "./tools"
+
+const log = Log.create({ service: "memory.database" })
 
 // =============================================================================
 // Constants
@@ -29,8 +32,11 @@ export const OPENSPLOIT_LANCE_PATH = path.join(
 /** Metadata file path */
 const METADATA_PATH = path.join(os.homedir(), ".opensploit", "metadata.json")
 
-/** Current schema version - 6.1 adds P2 metadata fields (confidence, last_accessed, access_count, superseded_by) */
-const SCHEMA_VERSION = "6.1"
+/** Current schema version - 7.0 adds method-level tool rows, sparse_json to experiences/insights */
+const SCHEMA_VERSION = "7.0"
+
+/** Previous schema version for migration detection */
+const PREVIOUS_SCHEMA_VERSION = "6.1"
 
 // =============================================================================
 // Database Connection
@@ -99,6 +105,53 @@ async function writeMetadata(): Promise<void> {
 }
 
 /**
+ * Check if a schema migration is needed (old version → new version).
+ * Returns the old version string if migration needed, null otherwise.
+ */
+async function checkMigrationNeeded(): Promise<string | null> {
+  try {
+    const content = await fs.readFile(METADATA_PATH, "utf-8")
+    const metadata: MemoryMetadata = JSON.parse(content)
+    if (metadata.initialized && metadata.version && metadata.version !== SCHEMA_VERSION) {
+      return metadata.version
+    }
+  } catch {
+    // Not initialized or corrupt — no migration needed
+  }
+  return null
+}
+
+/**
+ * Migrate from v6.1 to v7.0.
+ *
+ * v7.0 adds sparse_json to experiences/insights Arrow schemas.
+ * Since experiences and insights are learning data that rebuilds over time,
+ * we drop and recreate them with the new schema. Tools table is handled
+ * separately by importFromLance/importFromYAML.
+ */
+async function migrateToV7(db: lancedb.Connection): Promise<void> {
+  const existingTables = await db.tableNames()
+
+  // Drop and recreate experiences with new schema (includes sparse_json)
+  if (existingTables.includes("experiences")) {
+    await db.dropTable("experiences")
+  }
+  await db.createEmptyTable("experiences", experienceSchema)
+
+  // Drop and recreate insights with new schema (includes sparse_json)
+  if (existingTables.includes("insights")) {
+    await db.dropTable("insights")
+  }
+  await db.createEmptyTable("insights", insightSchema)
+
+  // Tools table will be recreated on next registry import (method-level rows)
+  // Drop it to force a fresh import with the new MethodRow schema
+  if (existingTables.includes("tools")) {
+    await db.dropTable("tools")
+  }
+}
+
+/**
  * Initialize the memory system
  *
  * Implements Doc 22 §Part 6 (lines 1785-1824)
@@ -114,8 +167,19 @@ async function writeMetadata(): Promise<void> {
  * @returns true if initialized, false if already initialized
  */
 export async function initializeMemorySystem(): Promise<boolean> {
-  // Check if already initialized
-  if (await isInitialized()) {
+  // Check for schema migration
+  const oldVersion = await checkMigrationNeeded()
+  if (oldVersion) {
+    const db = await getConnection()
+    if (oldVersion === PREVIOUS_SCHEMA_VERSION) {
+      await migrateToV7(db)
+    }
+    // After migration, continue to ensure all tables exist
+    await writeMetadata()
+  }
+
+  // Check if already initialized (and up to date)
+  if (!oldVersion && await isInitialized()) {
     return false
   }
 
@@ -146,6 +210,27 @@ export async function initializeMemorySystem(): Promise<boolean> {
   // when the registry is first loaded. No empty table needed here
   // since tools are always bulk-inserted from the archive or YAML source.
   // FTS indexes are created during import (see tools.ts).
+
+  // Pre-seed insights from registry routing metadata if insights table is empty
+  // Non-blocking — if embedding service or registry unavailable, skip silently
+  try {
+    const insightsTable = await db.openTable("insights")
+    const insightCount = await insightsTable.countRows()
+    if (insightCount === 0) {
+      // Dynamically import to avoid circular dependency
+      const { loadRegistry } = await import("./tools")
+      const { preSeedInsightsFromRegistry } = await import("./insight")
+      const registryResult = await loadRegistry()
+      if (registryResult) {
+        const seeded = await preSeedInsightsFromRegistry(registryResult.tools)
+        if (seeded > 0) {
+          log.info("pre-seeded insights from registry", { count: seeded })
+        }
+      }
+    }
+  } catch {
+    // Non-critical — seeding happens on next init or can be triggered manually
+  }
 
   // Write metadata to mark as initialized
   await writeMetadata()
