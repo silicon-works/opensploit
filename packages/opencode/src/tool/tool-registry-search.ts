@@ -7,6 +7,7 @@ import fs from "fs/promises"
 import yaml from "js-yaml"
 import * as lancedb from "@lancedb/lancedb"
 import { Log } from "../util/log"
+import { getRootSession } from "../session/hierarchy"
 import {
   updateSearchContext,
   getToolContext,
@@ -1246,6 +1247,26 @@ export const ToolRegistrySearchTool = Tool.define("tool_registry_search", {
     } catch (error) {
       log.warn("unified search failed, returning tool-only results", { error: String(error) })
     }
+
+    // Cache results in engagement state for cross-agent dedup (RC6)
+    try {
+      const rootId = getRootSession(ctx.sessionID)
+      const { loadEngagementState, mergeState: mergeEngState, saveEngagementState } = await import("./engagement-state")
+      const state = await loadEngagementState(rootId).catch(() => ({}))
+      if (Object.keys(state).length > 0) {
+        await saveEngagementState(rootId, mergeEngState(state as any, {
+          toolSearchCache: [{
+            query,
+            phase,
+            results: scoredResults.slice(0, 3).map((r: any) => ({
+              tool: r.tool,
+              method: r.suggestedMethod,
+            })),
+            timestamp: new Date().toISOString(),
+          }],
+        }))
+      }
+    } catch { /* non-critical */ }
 
     return {
       output,

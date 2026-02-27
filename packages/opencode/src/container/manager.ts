@@ -150,6 +150,8 @@ export namespace ContainerManager {
     useServiceNetwork?: string
     /** Environment variables to pass to the container */
     env?: Record<string, string>
+    /** Tool-specific timeout in milliseconds */
+    timeout?: number
   }
 
   /**
@@ -205,9 +207,15 @@ export namespace ContainerManager {
       throw new Error("Docker is not available. Please ensure Docker is installed and running.")
     }
 
-    // Pull image if not exists
+    // Pull image if not exists (with retry for transient failures)
     if (!(await imageExists(image))) {
-      await pullImage(image)
+      try {
+        await pullImage(image)
+      } catch (pullError) {
+        log.warn("image pull failed, retrying in 3s", { image, error: String(pullError) })
+        await new Promise(r => setTimeout(r, 3000))
+        await pullImage(image) // Let this throw if it also fails
+      }
     }
 
     // Start container with stdio
@@ -483,10 +491,14 @@ export namespace ContainerManager {
     }
 
     // Call the tool
-    const result = await client.callTool({
-      name: method,
-      arguments: args,
-    })
+    const result = await client.callTool(
+      { name: method, arguments: args },
+      undefined,
+      {
+        timeout: options?.timeout ?? 300_000,
+        resetTimeoutOnProgress: true,
+      }
+    )
 
     return result
   }

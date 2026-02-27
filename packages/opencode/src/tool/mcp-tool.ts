@@ -24,6 +24,18 @@ const log = Log.create({ service: "tool.mcp" })
 // Common parameter names that contain targets
 const TARGET_PARAM_NAMES = ["target", "host", "hostname", "url", "ip", "address", "target_host", "rhost", "rhosts"]
 
+function summarizeTargetArgs(args: Record<string, unknown>): string {
+  const keys = TARGET_PARAM_NAMES.concat(["port", "ports", "wordlist", "method"])
+  const parts: string[] = []
+  for (const key of keys) {
+    if (args[key] !== undefined) {
+      const val = String(args[key])
+      parts.push(`${key}=${val.length > 50 ? val.slice(0, 50) + "..." : val}`)
+    }
+  }
+  return parts.join(", ") || "(no target params)"
+}
+
 // Registry cache (shared with tool-registry-search.ts)
 const REGISTRY_URL = "https://opensploit.ai/registry.yaml"
 const REGISTRY_DIR = path.join(os.homedir(), ".opensploit")
@@ -39,7 +51,13 @@ interface RegistryTool {
     setup_url?: string
     setup_instructions?: string
   }
-  methods?: Record<string, { description: string; params?: Record<string, unknown> }>
+  methods?: Record<string, {
+    description: string
+    params?: Record<string, unknown>
+    required_ports?: number[]
+    timeout_seconds?: number
+  }>
+  timeout_seconds?: number
   requirements?: {
     network?: boolean
     privileged?: boolean
@@ -49,6 +67,7 @@ interface RegistryTool {
   service?: boolean // Mark as a service container that persists
   service_name?: string // Name for network sharing (e.g., "vpn")
   use_service?: string // Use network from this service (e.g., "vpn")
+  see_also?: Array<{ tool: string; reason: string }>
 }
 
 interface Registry {
@@ -181,6 +200,7 @@ interface ToolResult {
     method: string
     success: boolean
     error?: string
+    skipped?: boolean
   }
 }
 
@@ -190,9 +210,10 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
     tool: z.string().describe("The tool name from the registry (e.g., 'nmap', 'sqlmap', 'ffuf')"),
     method: z.string().describe("The method to call on the tool (e.g., 'port_scan', 'test_injection')"),
     args: z.record(z.string(), z.unknown()).optional().describe("Arguments to pass to the method"),
+    timeout: z.number().optional().describe("Timeout in seconds. Overrides the registry default. Use when you know the operation will take longer (e.g., full port scan, large wordlist)."),
   }),
   async execute(params, ctx): Promise<ToolResult> {
-    const { tool: toolName, method, args = {} } = params
+    const { tool: toolName, method, args = {}, timeout: agentTimeout } = params
     const sessionId = ctx.sessionID
     const rootSessionId = getRootSession(sessionId)
 
@@ -234,6 +255,16 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
         metadata: { tool: toolName, method, success: false, error: "Method not found" },
       }
     }
+
+    // Timeout chain: agent-specified > tool-level registry default > 300s system default
+    // (method-level kept for backwards compat but tool.yaml no longer ships per-method values)
+    const methodDefForTimeout = toolDef.methods?.[method]
+    const methodTimeout = methodDefForTimeout?.timeout_seconds
+    const toolTimeout = toolDef.timeout_seconds
+    const timeoutMs = agentTimeout ? agentTimeout * 1000
+      : methodTimeout ? methodTimeout * 1000
+      : toolTimeout ? toolTimeout * 1000
+      : 300_000
 
     try {
       // Validate targets in args
@@ -293,6 +324,55 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
           metadata: { tool: toolName, method, success: false, error: "Permission denied" },
         }
       }
+
+      // Pre-flight: skip tools with repeated infrastructure failures (RC1)
+      try {
+        const { loadEngagementState } = await import("./engagement-state")
+        const state = await loadEngagementState(rootSessionId).catch(() => ({} as any))
+        const toolFailures = (state as any).toolFailures || []
+        const { Config } = await import("../config/config")
+        const cfg = await Config.get().catch(() => ({} as any))
+        const threshold = (cfg as any).experimental?.tool_failure_threshold ?? 3
+        const match = toolFailures.find(
+          (f: any) => f.tool === toolName && (!f.method || f.method === method) && (f.count || 0) >= threshold
+        )
+        if (match) {
+          return {
+            output: `**SKIPPED**: \`${toolName}.${method}\` has failed ${match.count} times.\n\n` +
+                    `Last error: ${match.error}\n\n` +
+                    `Use \`tool_registry_search\` to find an alternative tool. ` +
+                    `To retry, clear failures: \`update_engagement_state({ toolFailures: [] })\`.`,
+            title: `Skipped: ${toolName}.${method} (known broken)`,
+            metadata: { tool: toolName, method, success: false, error: "Tool known broken", skipped: true },
+          }
+        }
+
+        // Port pre-flight: check if required ports are accessible (RC2)
+        const methodEntry = toolDef.methods?.[method]
+        const requiredPorts: number[] = methodEntry?.required_ports ?? []
+
+        if (requiredPorts.length > 0 && Array.isArray(state.ports) && state.ports.length > 0) {
+          const portChecks = requiredPorts.map(rp => {
+            const entry = state.ports.find((p: any) => p.port === rp)
+            return { port: rp, scanned: !!entry, state: entry?.state as string | undefined }
+          })
+
+          const allBlocked = portChecks.every(p => p.scanned && (p.state === "filtered" || p.state === "closed"))
+          const anyUnscanned = portChecks.some(p => !p.scanned)
+
+          // Only block if we have positive evidence that EVERY required port is blocked
+          if (allBlocked && !anyUnscanned) {
+            const blockedList = portChecks.map(p => `${p.port} (${p.state})`).join(", ")
+            return {
+              output: `**ALL REQUIRED PORTS BLOCKED**: \`${toolName}.${method}\` needs port(s) ${requiredPorts.join(", ")} ` +
+                      `but all are ${blockedList} on the target.\n\n` +
+                      `Use \`tool_registry_search\` to find tools that work with the ports that ARE open.`,
+              title: `Blocked: ${toolName}.${method} (ports ${requiredPorts.join(",")})`,
+              metadata: { tool: toolName, method, success: false, error: `All required ports blocked` },
+            }
+          }
+        }
+      } catch { /* Non-critical pre-flight */ }
 
       // Determine if we should use local server or Docker
       let result: unknown
@@ -361,6 +441,7 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
             isService: toolDef.service,
             serviceName: toolDef.service_name,
             useServiceNetwork,
+            timeout: timeoutMs,
           }
         )
       }
@@ -384,6 +465,12 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
       } else {
         rawOutput = String(result)
       }
+
+      // Detect MCP soft failures: BaseMCPServer sets isError=true when result.success=false
+      // This is the middle ground — agent SEES the failure (metadata.success: false) but it's
+      // NOT auto-recorded to toolFailures/circuit breaker (LLM decides what to record)
+      const isToolError = typeof result === "object" && result !== null &&
+        (result as Record<string, unknown>).isError === true
 
       // Use output store to handle large outputs
       // This prevents context overflow by storing large outputs externally
@@ -420,10 +507,12 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
           method,
           args: args as Record<string, unknown>,
         }
-        const experienceOutput: ExperienceToolResult = {
-          output: rawOutput,
-          ...(typeof result === "object" && result !== null ? (result as Record<string, unknown>) : {}),
-        }
+        const experienceOutput: ExperienceToolResult = isToolError
+          ? { error: rawOutput.slice(0, 500), output: rawOutput }
+          : {
+              output: rawOutput,
+              ...(typeof result === "object" && result !== null ? (result as Record<string, unknown>) : {}),
+            }
         const toolContext = getToolContext(sessionId)
         await recordExperience(sessionId, experienceParams, experienceOutput, toolContext)
       } catch (expError) {
@@ -434,7 +523,7 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
       return {
         output,
         title: `${toolName}.${method}${storeResult.stored ? " (output stored)" : ""}`,
-        metadata: { tool: toolName, method, success: true },
+        metadata: { tool: toolName, method, success: !isToolError },
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
@@ -456,6 +545,59 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
       } catch (expError) {
         // Don't fail tool execution if experience recording fails
         log.warn("failed to record failed experience", { toolName, method, error: String(expError) })
+      }
+
+      // Auto-record MCP failure to engagement state (RC1)
+      try {
+        const { loadEngagementState, mergeState: mergeEngState, saveEngagementState } = await import("./engagement-state")
+        const state = await loadEngagementState(rootSessionId).catch(() => ({} as any))
+        if (Object.keys(state).length > 0) {
+          await saveEngagementState(rootSessionId, mergeEngState(state, {
+            toolFailures: [{
+              tool: toolName,
+              method,
+              error: errorMessage.slice(0, 200),
+              count: 1,
+              firstSeen: new Date().toISOString(),
+              lastSeen: new Date().toISOString(),
+              argsSummary: summarizeTargetArgs(args as Record<string, unknown>),
+            }],
+          }))
+        }
+      } catch { /* Don't fail tool execution if state recording fails */ }
+
+      // Timeout-specific error messages (RC3)
+      const isTimeout = /timeout|timed?\s*out|ETIMEDOUT/i.test(errorMessage)
+      if (isTimeout) {
+        const sec = Math.round(timeoutMs / 1000)
+        return {
+          output: `**TIMEOUT**: \`${toolName}.${method}\` exceeded ${sec}s timeout.\n\n` +
+                  `Suggestions:\n` +
+                  `- Use more targeted parameters (fewer ports, smaller wordlist)\n` +
+                  `- Break the task into smaller chunks\n` +
+                  `- Use \`tool_registry_search\` for a faster alternative`,
+          title: `Timeout: ${toolName}.${method} (${sec}s)`,
+          metadata: { tool: toolName, method, success: false, error: `Timeout after ${sec}s` },
+        }
+      }
+
+      // Image pull failure with see_also alternatives (RC8)
+      const isPullFailure = /pull|manifest|denied|unauthorized|not found/i.test(errorMessage) &&
+                            /image|docker|container/i.test(errorMessage)
+      if (isPullFailure) {
+        const seeAlso = toolDef.see_also
+        let altMsg = ""
+        if (Array.isArray(seeAlso) && seeAlso.length > 0) {
+          altMsg = "\n\nAlternatives from registry:\n" +
+            seeAlso.map((a) => `- **${a.tool}**: ${a.reason}`).join("\n")
+        }
+        return {
+          output: `**DOCKER IMAGE UNAVAILABLE**: \`${toolDef.image}\` could not be pulled.\n\n` +
+                  `Error: ${errorMessage}\n\n` +
+                  `Use \`tool_registry_search\` to find alternative tools.${altMsg}`,
+          title: `Image unavailable: ${toolName}`,
+          metadata: { tool: toolName, method, success: false, error: "Image pull failed" },
+        }
       }
 
       return {
