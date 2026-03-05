@@ -120,6 +120,7 @@ export const TaskTool = Tool.define("task", async (ctx) => {
         return await Session.create({
           parentID: ctx.sessionID,
           title: params.description + ` (@${agent.name} subagent)`,
+          objective: params.prompt,
           permission: [
             // TodoWrite/TodoRead: enabled for pentest sub-agents, denied for others
             ...(isPentest ? [] : [
