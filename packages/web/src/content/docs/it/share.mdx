@@ -21,7 +21,7 @@ Quando condividi una conversazione, OpenCode:
 
 ---
 
-## Sharing
+## Condivisione
 
 OpenCode supporta tre modalita di condivisione che controllano come vengono condivise le conversazioni:
 
@@ -41,20 +41,20 @@ Per impostare esplicitamente la modalita manuale nel tuo [file di config](/docs/
 
 ```json title="opencode.json"
 {
-  "$schema": "https://opncd.ai/config.json",
+  "$schema": "https://opencode.ai/config.json",
   "share": "manual"
 }
 ```
 
 ---
 
-### Auto-share
+### Automatico
 
 Puoi abilitare la condivisione automatica per tutte le nuove conversazioni impostando l'opzione `share` su `"auto"` nel tuo [file di config](/docs/config):
 
 ```json title="opencode.json"
 {
-  "$schema": "https://opncd.ai/config.json",
+  "$schema": "https://opencode.ai/config.json",
   "share": "auto"
 }
 ```
@@ -63,13 +63,13 @@ Con la condivisione automatica attiva, ogni nuova conversazione verra condivisa 
 
 ---
 
-### Disabled
+### Disabilitato
 
 Puoi disabilitare completamente la condivisione impostando l'opzione `share` su `"disabled"` nel tuo [file di config](/docs/config):
 
 ```json title="opencode.json"
 {
-  "$schema": "https://opncd.ai/config.json",
+  "$schema": "https://opencode.ai/config.json",
   "share": "disabled"
 }
 ```
@@ -96,7 +96,7 @@ Ci sono alcune cose da tenere a mente quando condividi una conversazione.
 
 ---
 
-### Data retention
+### Conservazione dati
 
 Le conversazioni condivise restano accessibili finche non le annulli esplicitamente. Questo include:
 
@@ -106,7 +106,7 @@ Le conversazioni condivise restano accessibili finche non le annulli esplicitame
 
 ---
 
-### Recommendations
+### Raccomandazioni
 
 - Condividi solo conversazioni che non contengono informazioni sensibili.
 - Rivedi il contenuto della conversazione prima di condividerla.

@@ -7,7 +7,7 @@ OpenCode formaterer automatisk filer, efter de er skrevet eller redigeret ved hj
 
 ---
 
-## Indbygget
+## Indbyggede
 
 OpenCode leveres med flere indbyggede formatere til populære sprog og rammer. Nedenfor er en liste over de formatere, understøttede filtypenavne og kommandoer eller konfigurationsmuligheder, der har brug for.
 
@@ -29,6 +29,7 @@ OpenCode leveres med flere indbyggede formatere til populære sprog og rammer. N
 | htmlbeautifier        | .erb,.html.erb                                                                                 | `htmlbeautifier` kommando tilgængelig                                                                |
 | luft                  | .R                                                                                             | `air` kommando tilgængelig                                                                           |
 | dart                  | .dart                                                                                          | `dart` kommando tilgængelig                                                                          |
+| dfmt                  | .d                                                                                             | `dfmt` kommando tilgængelig                                                                          |
 | ocamlformat           | .ml,.mli                                                                                       | `ocamlformat` kommando tilgængelig og `.ocamlformat` config fil                                      |
 | terraform             | .tf,.tfvars                                                                                    | `terraform` kommando tilgængelig                                                                     |
 | glimt                 | .glimt                                                                                         | `gleam` kommando tilgængelig                                                                         |
@@ -54,7 +55,7 @@ Denne proces sker i baggrunden, hvilket sikrer, at dine kodestile vedligeholdes 
 
 ---
 
-## Konfigurer
+## Konfiguration
 
 Du kan tilpasse formatere gennem afsnittet `formatter` i din OpenCode-konfiguration.
 
@@ -69,10 +70,10 @@ Hver formateringskonfiguration understøtter følgende:
 
 | Ejendom       | Skriv    | Beskrivelse                                                          |
 | ------------- | -------- | -------------------------------------------------------------------- |
-| `disabled`    | boolsk   | Indstil dette til `true` for at deaktivere formateringsværktøjet     |
-| `command`     | styrke[] | Kommandoen til at køre for formatering                               |
-| `environment` | objekt   | Miljøvariabler, der skal indstilles, når formateringsværktøjet køres |
-| `extensions`  | styrke[] | Filtypenavne, som denne formaterer skal håndtere                     |
+| `disabled`    | boolean  | Indstil dette til `true` for at deaktivere formateringsværktøjet     |
+| `command`     | string[] | Kommandoen til at køre for formatering                               |
+| `environment` | object   | Miljøvariabler, der skal indstilles, når formateringsværktøjet køres |
+| `extensions`  | string[] | Filtypenavne, som denne formaterer skal håndtere                     |
 
 Lad os se på nogle eksempler.
 

@@ -24,6 +24,7 @@ import path from "path"
 import os from "os"
 import { mkdirSync, existsSync, writeFileSync, readFileSync, copyFileSync, cpSync, renameSync, rmSync } from "fs"
 import { Session } from "@/session"
+import type { SessionID } from "@/session/schema"
 import { Trajectory } from "@/session/trajectory"
 import { MessageV2 } from "@/session/message-v2"
 import { Log } from "@/util/log"
@@ -196,7 +197,7 @@ interface MessageStats {
 }
 
 async function collectMessageStats(sessionID: string, stats: MessageStats): Promise<void> {
-  const messages = await Session.messages({ sessionID })
+  const messages = await Session.messages({ sessionID: sessionID as SessionID })
 
   for (const msg of messages) {
     stats.messageCount++
@@ -236,8 +237,8 @@ async function collectMessageStats(sessionID: string, stats: MessageStats): Prom
 export async function saveSessionMetadata(sessionID: string): Promise<SessionMetadata | null> {
   const lock = await Lock.write(`metadata:${sessionID}`)
   try {
-    const session = await Session.get(sessionID)
-    const rootMessages = await Session.messages({ sessionID })
+    const session = await Session.get(sessionID as SessionID)
+    const rootMessages = await Session.messages({ sessionID: sessionID as SessionID })
 
     if (rootMessages.length === 0) {
       log.info("skip_empty_session", { sessionID: sessionID.slice(-8) })
@@ -325,7 +326,7 @@ export async function saveSessionMetadata(sessionID: string): Promise<SessionMet
  * Get all child sessions recursively.
  */
 async function getChildSessionsRecursive(sessionID: string): Promise<Session.Info[]> {
-  const children = await Session.children(sessionID)
+  const children = await Session.children(sessionID as SessionID)
   const all: Session.Info[] = [...children]
   for (const child of children) {
     const grandchildren = await getChildSessionsRecursive(child.id)
@@ -343,7 +344,7 @@ async function processSessionMessages(
   agentName: string,
   entries: TrajectoryEntry[]
 ): Promise<void> {
-  const messages = await Session.messages({ sessionID })
+  const messages = await Session.messages({ sessionID: sessionID as SessionID })
 
   for (const msg of messages) {
     // Extract message-level info with proper type narrowing
@@ -484,7 +485,7 @@ function extractAgentName(title: string, isRoot: boolean): string {
 export async function saveTrajectory(sessionID: string): Promise<number> {
   const lock = await Lock.write(`trajectory:${sessionID}`)
   try {
-    const session = await Session.get(sessionID)
+    const session = await Session.get(sessionID as SessionID)
     const entries: TrajectoryEntry[] = []
 
     // Process root session
@@ -591,7 +592,7 @@ export function persistWorkingDirToArchive(rootSessionID: string): void {
  */
 async function isPentestSession(sessionID: string): Promise<boolean> {
   try {
-    const messages = await Session.messages({ sessionID })
+    const messages = await Session.messages({ sessionID: sessionID as SessionID })
     for (const msg of messages) {
       if (msg.info.role === "assistant" && "mode" in msg.info) {
         return (msg.info as any).mode === "pentest"
@@ -608,7 +609,7 @@ async function isPentestSession(sessionID: string): Promise<boolean> {
  */
 async function findRootSessionID(sessionID: string): Promise<string> {
   try {
-    const session = await Session.get(sessionID)
+    const session = await Session.get(sessionID as SessionID)
     if (!session.parentID) {
       return sessionID
     }

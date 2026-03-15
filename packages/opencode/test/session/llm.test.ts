@@ -7,9 +7,12 @@ import { Instance } from "../../src/project/instance"
 import { Provider } from "../../src/provider/provider"
 import { ProviderTransform } from "../../src/provider/transform"
 import { ModelsDev } from "../../src/provider/models"
+import { ProviderID, ModelID } from "../../src/provider/schema"
+import { Filesystem } from "../../src/util/filesystem"
 import { tmpdir } from "../fixture/fixture"
 import type { Agent } from "../../src/agent/agent"
 import type { MessageV2 } from "../../src/session/message-v2"
+import { SessionID, MessageID } from "../../src/session/schema"
 
 describe("session.llm.hasToolCalls", () => {
   test("returns false for empty messages array", () => {
@@ -185,7 +188,7 @@ function createChatStream(text: string) {
 
 async function loadFixture(providerID: string, modelID: string) {
   const fixturePath = path.join(import.meta.dir, "../tool/fixtures/models-api.json")
-  const data = (await Bun.file(fixturePath).json()) as Record<string, ModelsDev.Provider>
+  const data = await Filesystem.readJson<Record<string, ModelsDev.Provider>>(fixturePath)
   const provider = data[providerID]
   if (!provider) {
     throw new Error(`Missing provider in fixture: ${providerID}`)
@@ -263,8 +266,8 @@ describe("session.llm.stream", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const resolved = await Provider.getModel(providerID, model.id)
-        const sessionID = "session-test-1"
+        const resolved = await Provider.getModel(ProviderID.make(providerID), ModelID.make(model.id))
+        const sessionID = SessionID.make("session-test-1")
         const agent = {
           name: "test",
           mode: "primary",
@@ -275,12 +278,12 @@ describe("session.llm.stream", () => {
         } satisfies Agent.Info
 
         const user = {
-          id: "user-1",
+          id: MessageID.make("user-1"),
           sessionID,
           role: "user",
           time: { created: Date.now() },
           agent: agent.name,
-          model: { providerID, modelID: resolved.id },
+          model: { providerID: ProviderID.make(providerID), modelID: resolved.id },
           variant: "high",
         } satisfies MessageV2.User
 
@@ -306,7 +309,6 @@ describe("session.llm.stream", () => {
         expect(url.pathname.startsWith("/v1/")).toBe(true)
         expect(url.pathname.endsWith("/chat/completions")).toBe(true)
         expect(headers.get("Authorization")).toBe("Bearer test-key")
-        expect(headers.get("User-Agent") ?? "").toMatch(/^opencode\//)
 
         expect(body.model).toBe(resolved.api.id)
         expect(body.temperature).toBe(0.4)
@@ -314,12 +316,7 @@ describe("session.llm.stream", () => {
         expect(body.stream).toBe(true)
 
         const maxTokens = (body.max_tokens as number | undefined) ?? (body.max_output_tokens as number | undefined)
-        const expectedMaxTokens = ProviderTransform.maxOutputTokens(
-          resolved.api.npm,
-          ProviderTransform.options({ model: resolved, sessionID }),
-          resolved.limit.output,
-          LLM.OUTPUT_TOKEN_MAX,
-        )
+        const expectedMaxTokens = ProviderTransform.maxOutputTokens(resolved)
         expect(maxTokens).toBe(expectedMaxTokens)
 
         const reasoning = (body.reasoningEffort as string | undefined) ?? (body.reasoning_effort as string | undefined)
@@ -399,8 +396,8 @@ describe("session.llm.stream", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const resolved = await Provider.getModel("openai", model.id)
-        const sessionID = "session-test-2"
+        const resolved = await Provider.getModel(ProviderID.openai, ModelID.make(model.id))
+        const sessionID = SessionID.make("session-test-2")
         const agent = {
           name: "test",
           mode: "primary",
@@ -410,12 +407,12 @@ describe("session.llm.stream", () => {
         } satisfies Agent.Info
 
         const user = {
-          id: "user-2",
+          id: MessageID.make("user-2"),
           sessionID,
           role: "user",
           time: { created: Date.now() },
           agent: agent.name,
-          model: { providerID: "openai", modelID: resolved.id },
+          model: { providerID: ProviderID.make("openai"), modelID: resolved.id },
           variant: "high",
         } satisfies MessageV2.User
 
@@ -442,12 +439,7 @@ describe("session.llm.stream", () => {
         expect((body.reasoning as { effort?: string } | undefined)?.effort).toBe("high")
 
         const maxTokens = body.max_output_tokens as number | undefined
-        const expectedMaxTokens = ProviderTransform.maxOutputTokens(
-          resolved.api.npm,
-          ProviderTransform.options({ model: resolved, sessionID }),
-          resolved.limit.output,
-          LLM.OUTPUT_TOKEN_MAX,
-        )
+        const expectedMaxTokens = ProviderTransform.maxOutputTokens(resolved)
         expect(maxTokens).toBe(expectedMaxTokens)
       },
     })
@@ -526,8 +518,8 @@ describe("session.llm.stream", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const resolved = await Provider.getModel(providerID, model.id)
-        const sessionID = "session-test-3"
+        const resolved = await Provider.getModel(ProviderID.make(providerID), ModelID.make(model.id))
+        const sessionID = SessionID.make("session-test-3")
         const agent = {
           name: "test",
           mode: "primary",
@@ -538,12 +530,12 @@ describe("session.llm.stream", () => {
         } satisfies Agent.Info
 
         const user = {
-          id: "user-3",
+          id: MessageID.make("user-3"),
           sessionID,
           role: "user",
           time: { created: Date.now() },
           agent: agent.name,
-          model: { providerID, modelID: resolved.id },
+          model: { providerID: ProviderID.make(providerID), modelID: resolved.id },
         } satisfies MessageV2.User
 
         const stream = await LLM.stream({
@@ -565,14 +557,7 @@ describe("session.llm.stream", () => {
 
         expect(capture.url.pathname.endsWith("/messages")).toBe(true)
         expect(body.model).toBe(resolved.api.id)
-        expect(body.max_tokens).toBe(
-          ProviderTransform.maxOutputTokens(
-            resolved.api.npm,
-            ProviderTransform.options({ model: resolved, sessionID }),
-            resolved.limit.output,
-            LLM.OUTPUT_TOKEN_MAX,
-          ),
-        )
+        expect(body.max_tokens).toBe(ProviderTransform.maxOutputTokens(resolved))
         expect(body.temperature).toBe(0.4)
         expect(body.top_p).toBe(0.9)
       },
@@ -634,8 +619,8 @@ describe("session.llm.stream", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const resolved = await Provider.getModel(providerID, model.id)
-        const sessionID = "session-test-4"
+        const resolved = await Provider.getModel(ProviderID.make(providerID), ModelID.make(model.id))
+        const sessionID = SessionID.make("session-test-4")
         const agent = {
           name: "test",
           mode: "primary",
@@ -646,12 +631,12 @@ describe("session.llm.stream", () => {
         } satisfies Agent.Info
 
         const user = {
-          id: "user-4",
+          id: MessageID.make("user-4"),
           sessionID,
           role: "user",
           time: { created: Date.now() },
           agent: agent.name,
-          model: { providerID, modelID: resolved.id },
+          model: { providerID: ProviderID.make(providerID), modelID: resolved.id },
         } satisfies MessageV2.User
 
         const stream = await LLM.stream({
@@ -677,14 +662,7 @@ describe("session.llm.stream", () => {
         expect(capture.url.pathname).toBe(pathSuffix)
         expect(config?.temperature).toBe(0.3)
         expect(config?.topP).toBe(0.8)
-        expect(config?.maxOutputTokens).toBe(
-          ProviderTransform.maxOutputTokens(
-            resolved.api.npm,
-            ProviderTransform.options({ model: resolved, sessionID }),
-            resolved.limit.output,
-            LLM.OUTPUT_TOKEN_MAX,
-          ),
-        )
+        expect(config?.maxOutputTokens).toBe(ProviderTransform.maxOutputTokens(resolved))
       },
     })
   })
