@@ -23,6 +23,57 @@ export namespace ContainerManager {
     isService?: boolean
     serviceName?: string
     dockerContainerId?: string // Actual Docker container ID for network sharing
+    clockOffset?: string // libfaketime offset this container was started with
+    callMutex: CallMutex // Serialize concurrent calls to the same stdio pipe
+    activeCalls: number // Number of in-flight tool calls (skip idle timeout when > 0)
+  }
+
+  /**
+   * Simple mutex to serialize calls to a single MCP client.
+   * The MCP SDK's stdio transport is not safe for concurrent callTool()
+   * because JSON-RPC messages interleave on the pipe, corrupting the stream.
+   */
+  class CallMutex {
+    private queue: Array<() => void> = []
+    private locked = false
+    private destroyed = false
+
+    async acquire(): Promise<void> {
+      if (this.destroyed) {
+        throw new Error("CallMutex destroyed — container is shutting down")
+      }
+      if (!this.locked) {
+        this.locked = true
+        return
+      }
+      return new Promise<void>((resolve) => {
+        this.queue.push(resolve)
+      })
+    }
+
+    release(): void {
+      const next = this.queue.shift()
+      if (next) {
+        next()
+      } else {
+        this.locked = false
+      }
+    }
+
+    /**
+     * Reject all queued waiters and mark the mutex as unusable.
+     * Called during stopContainer() to unblock any calls waiting on a dying container.
+     */
+    destroy(): void {
+      this.destroyed = true
+      this.locked = false
+      const pending = this.queue.splice(0)
+      for (const waiter of pending) {
+        // Resolve waiters so they proceed to callTool which will fail with
+        // a transport error — cleaner than leaving them hanging forever.
+        waiter()
+      }
+    }
   }
 
   // Track running containers
@@ -152,6 +203,10 @@ export namespace ContainerManager {
     env?: Record<string, string>
     /** Tool-specific timeout in milliseconds */
     timeout?: number
+    /** Time offset for libfaketime (e.g., '+7h', '-30m'). Shifts container clock. */
+    clockOffset?: string
+    /** Docker resource limits from registry */
+    resources?: { memory_mb?: number; cpu?: number }
   }
 
   /**
@@ -251,6 +306,12 @@ export namespace ContainerManager {
     const mergedEnv: Record<string, string> = {
       ...(envOverrides.get(toolName) ?? {}),
       ...(options?.env ?? {}),
+      // Clock offset via libfaketime (for Kerberos clock skew)
+      ...(options?.clockOffset ? {
+        LD_PRELOAD: "/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1",
+        FAKETIME: options.clockOffset,
+        FAKETIME_DONT_FAKE_MONOTONIC: "1",
+      } : {}),
     }
 
     // Network configuration
@@ -280,6 +341,13 @@ export namespace ContainerManager {
     if (options?.privileged) {
       dockerArgs.push("--privileged")
       log.info("running container in privileged mode", { toolName, image })
+    }
+    // Docker resource limits
+    if (options?.resources?.memory_mb != null) {
+      dockerArgs.push("--memory", `${options.resources.memory_mb}m`)
+    }
+    if (options?.resources?.cpu != null) {
+      dockerArgs.push("--cpus", String(options.resources.cpu))
     }
     // Pass environment variables to container
     for (const [key, value] of Object.entries(mergedEnv)) {
@@ -338,6 +406,9 @@ export namespace ContainerManager {
       isService,
       serviceName,
       dockerContainerId,
+      clockOffset: options?.clockOffset,
+      callMutex: new CallMutex(),
+      activeCalls: 0,
     }
 
     containers.set(toolName, managed)
@@ -366,6 +437,10 @@ export namespace ContainerManager {
     }
 
     log.info("stopping container", { toolName, image: container.image, isService: container.isService })
+
+    // Drain the call mutex — unblocks any queued callers so they fail fast
+    // instead of hanging forever on a dead container.
+    container.callMutex.destroy()
 
     try {
       await container.client.close()
@@ -422,6 +497,11 @@ export namespace ContainerManager {
       for (const [toolName, container] of containers) {
         // Skip service containers - they should persist for the session
         if (container.isService) {
+          continue
+        }
+
+        // Skip containers with active in-flight tool calls (e.g., hashcat cracking)
+        if (container.activeCalls > 0) {
           continue
         }
 
@@ -482,6 +562,18 @@ export namespace ContainerManager {
     args: Record<string, unknown>,
     options?: ContainerOptions
   ): Promise<unknown> {
+    // If clock offset changed from what the container was started with, restart it
+    // (env vars are set at docker run time — reusing a container would silently ignore the new offset)
+    const existing = containers.get(toolName)
+    if (existing && options?.clockOffset !== existing.clockOffset) {
+      log.info("clock offset changed, restarting container", {
+        toolName,
+        oldOffset: existing.clockOffset,
+        newOffset: options?.clockOffset,
+      })
+      await stopContainer(toolName)
+    }
+
     const client = await getClient(toolName, image, options)
 
     // Update last used time
@@ -490,16 +582,33 @@ export namespace ContainerManager {
       container.lastUsed = Date.now()
     }
 
-    // Call the tool
-    const result = await client.callTool(
-      { name: method, arguments: args },
-      undefined,
-      {
-        timeout: options?.timeout ?? 300_000,
-        resetTimeoutOnProgress: true,
-      }
-    )
+    // Serialize concurrent calls to the same container.
+    // The MCP SDK's stdio transport corrupts when multiple callTool()
+    // write to the same pipe concurrently (causes segfault in Bun).
+    const mutex = container?.callMutex
+    if (mutex) {
+      await mutex.acquire()
+    }
+    if (container) {
+      container.activeCalls++
+    }
+    try {
+      const result = await client.callTool(
+        { name: method, arguments: args },
+        undefined,
+        {
+          timeout: options?.timeout ?? 300_000,
+          resetTimeoutOnProgress: true,
+        }
+      )
 
-    return result
+      return result
+    } finally {
+      if (container) {
+        container.activeCalls--
+        container.lastUsed = Date.now()
+      }
+      mutex?.release()
+    }
   }
 }

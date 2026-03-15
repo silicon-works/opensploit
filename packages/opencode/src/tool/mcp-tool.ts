@@ -68,6 +68,7 @@ interface RegistryTool {
   service_name?: string // Name for network sharing (e.g., "vpn")
   use_service?: string // Use network from this service (e.g., "vpn")
   see_also?: Array<{ tool: string; reason: string }>
+  resources?: { memory_mb?: number; cpu?: number }
 }
 
 interface Registry {
@@ -190,6 +191,14 @@ Example:
   method: "port_scan"
   args: {"target": "10.10.10.1", "ports": "1-1000"}
 
+Clock offset:
+  Some Kerberos/AD operations fail if the container clock differs from the target by >5 minutes.
+  Use clock_offset to shift the container's perceived time:
+  tool: "impacket"
+  method: "get_tgt"
+  args: {"domain": "corp.local", "username": "admin", "password": "pass"}
+  clock_offset: "+7h"
+
 The container will be automatically started if not running, and will be stopped after idle timeout.`
 
 interface ToolResult {
@@ -211,9 +220,15 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
     method: z.string().describe("The method to call on the tool (e.g., 'port_scan', 'test_injection')"),
     args: z.record(z.string(), z.unknown()).optional().describe("Arguments to pass to the method"),
     timeout: z.number().optional().describe("Timeout in seconds. Overrides the registry default. Use when you know the operation will take longer (e.g., full port scan, large wordlist)."),
+    clock_offset: z.string().optional().describe(
+      "Time offset for the container (e.g., '+7h', '-30m', '+2h30m'). " +
+      "Uses libfaketime to shift the container's clock. " +
+      "Required for Kerberos operations when target has clock skew (KRB_AP_ERR_SKEW). " +
+      "Measure with: nmap -sV -p 88 <target> or check LDAP/SMB timestamps."
+    ),
   }),
   async execute(params, ctx): Promise<ToolResult> {
-    const { tool: toolName, method, args = {}, timeout: agentTimeout } = params
+    const { tool: toolName, method, args = {}, timeout: agentTimeout, clock_offset } = params
     const sessionId = ctx.sessionID
     const rootSessionId = getRootSession(sessionId)
 
@@ -341,7 +356,7 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
             output: `**SKIPPED**: \`${toolName}.${method}\` has failed ${match.count} times.\n\n` +
                     `Last error: ${match.error}\n\n` +
                     `Use \`tool_registry_search\` to find an alternative tool. ` +
-                    `To retry, clear failures: \`update_engagement_state({ toolFailures: [] })\`.`,
+                    `To retry, clear failures: \`update_engagement_state({ resetToolFailures: true })\`.`,
             title: `Skipped: ${toolName}.${method} (known broken)`,
             metadata: { tool: toolName, method, success: false, error: "Tool known broken", skipped: true },
           }
@@ -442,6 +457,8 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
             serviceName: toolDef.service_name,
             useServiceNetwork,
             timeout: timeoutMs,
+            clockOffset: clock_offset,
+            resources: toolDef.resources,
           }
         )
       }
@@ -497,6 +514,13 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
       } else {
         // Small output, return directly with header
         output = `${warnings}# ${toolName}.${method} Result\n\n${storeResult.output}`
+      }
+
+      // Detect Kerberos clock skew and hint about clock_offset
+      if (!clock_offset && /KRB_AP_ERR_SKEW|clock skew too great/i.test(rawOutput)) {
+        output += "\n\n**HINT:** Kerberos clock skew detected. Use the `clock_offset` parameter " +
+          "to shift the container's clock. Measure target time with `nmap -sV -p 88 <target>` " +
+          "or compare LDAP/SMB timestamps, then pass e.g. `clock_offset: \"+7h\"`."
       }
 
       // Record experience for learning (Doc 22 §Part 2)

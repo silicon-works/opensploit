@@ -448,6 +448,7 @@ export function mergeState(existing: EngagementState, updates: Partial<Engagemen
         ;(result as any)[key] = merged
       } else if (key === "toolFailures") {
         // Dedup by tool+method, increment count
+        // To clear all failures, use resetToolFailures: true (not an empty array)
         const merged = [...existingArray]
         for (const item of value) {
           const idx = merged.findIndex(
@@ -560,6 +561,7 @@ const UpdateParametersSchema = z.object({
   failedAttempts: z.array(FailedAttemptSchema).optional().describe("Failed attempts to record"),
   accessLevel: z.enum(["none", "user", "root"]).optional().describe("Update access level"),
   flags: z.array(z.string()).optional().describe("Captured flags to add"),
+  resetToolFailures: z.boolean().optional().describe("Set to true to clear ALL tool failure counters, unblocking skipped tools"),
 }).passthrough()
 
 export const UpdateEngagementStateTool = Tool.define("update_engagement_state", {
@@ -583,6 +585,11 @@ export const UpdateEngagementStateTool = Tool.define("update_engagement_state", 
 
     // Merge updates
     const newState = mergeState(existingState, params)
+
+    // Handle resetToolFailures boolean shortcut
+    if (params.resetToolFailures === true) {
+      newState.toolFailures = []
+    }
 
     // Save updated state
     await saveEngagementState(sessionID, newState)
@@ -608,6 +615,7 @@ export const UpdateEngagementStateTool = Tool.define("update_engagement_state", 
     if (params.failedAttempts?.length) updates.push(`failedAttempts: +${params.failedAttempts.length}`)
     if (params.accessLevel) updates.push(`accessLevel: ${params.accessLevel}`)
     if (params.flags?.length) updates.push(`flags: +${params.flags.length}`)
+    if (params.resetToolFailures === true) updates.push(`toolFailures: CLEARED`)
 
     const summary = updates.length > 0 ? updates.join(", ") : "no changes"
 
