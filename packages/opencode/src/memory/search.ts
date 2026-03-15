@@ -1,15 +1,18 @@
 /**
- * Unified Search
+ * Unified Search — Annotation Model
  *
- * Implements Doc 22 §Part 4 (lines 822-1082)
+ * Implements Doc 22 §Part 4 with cross-table architecture:
  *
- * Provides unified search across:
- * - Tools (from YAML registry, keyword + routing bonuses)
- * - Experiences (from LanceDB, vector similarity)
- * - Insights (from LanceDB, vector similarity weighted by confidence)
+ * Tools are primary results. Experiences and insights annotate and
+ * adjust tool scores instead of competing as peer results via RRF.
  *
- * Results are combined using Reciprocal Rank Fusion (RRF) which works
- * across different scoring systems by using ranked positions.
+ * Flow:
+ * 1. Tool results come pre-scored from tool-registry-search.ts (method-level)
+ * 2. Experiences and insights are searched in parallel
+ * 3. For each tool, matching insights boost/penalize the score
+ * 4. Matching experiences provide evidence annotations
+ * 5. Tools re-sorted by adjusted score
+ * 6. Each tool result includes evidence annotations for the agent
  */
 
 import { Log } from "../util/log"
@@ -31,7 +34,7 @@ interface ScoredItem {
   [key: string]: unknown
 }
 
-/** Scored tool result (from YAML registry search) */
+/** Scored tool result (from method-level search) */
 export interface ScoredTool extends ScoredItem {
   name: string
   description: string
@@ -42,6 +45,7 @@ export interface ScoredTool extends ScoredItem {
     triggers?: string[]
     never_use_for?: unknown[]
   }
+  suggestedMethod?: string
 }
 
 /** Scored experience result (from LanceDB) */
@@ -82,35 +86,58 @@ export interface ScoredInsight extends ScoredItem {
 /** Type of result item */
 export type ResultType = "tool" | "experience" | "insight"
 
-/** Ranked item after RRF fusion */
+/** Ranked item after RRF fusion (kept for backwards compatibility) */
 export interface RankedItem {
-  /** Prefixed ID: "tool:nmap", "exp:exp_123", "ins:ins_456" */
   id: string
-  /** RRF score (higher is better) */
   score: number
-  /** Type of result */
   type: ResultType
-  /** Original data */
   data: ScoredTool | ScoredExperience | ScoredInsight
 }
 
 /** Context for search (from ToolContext) */
 export interface SearchContext {
-  /** Current pentest phase */
   phase?: string
-  /** Tools already tried this session */
   toolsTried?: string[]
-  /** Tools that succeeded recently */
   recentSuccesses?: string[]
+}
+
+// =============================================================================
+// Annotation Types (Cross-Table Architecture)
+// =============================================================================
+
+/** Experience annotation on a tool result */
+export interface ExperienceAnnotation {
+  success: boolean
+  summary: string
+  recovery?: { tool: string; method: string }
+}
+
+/** Insight annotation on a tool result */
+export interface InsightAnnotation {
+  rule: string
+  confidence: number
+  effect: "boost" | "penalize"
+}
+
+/** Tool result with annotations from experiences and insights */
+export interface AnnotatedToolResult {
+  tool: string
+  name: string
+  baseScore: number
+  adjustedScore: number
+  suggestedMethod?: string
+  experiences: ExperienceAnnotation[]
+  insights: InsightAnnotation[]
 }
 
 /** Result of unified search */
 export interface UnifiedSearchResult {
-  /** Query that was searched */
   query: string
-  /** Combined and ranked results */
+  /** Combined and ranked results (kept for backwards compat) */
   results: RankedItem[]
-  /** Tool results (for backwards compatibility) */
+  /** Annotated tool results (new cross-table architecture) */
+  annotatedTools: AnnotatedToolResult[]
+  /** Tool results */
   tools: ScoredTool[]
   /** Experience results */
   experiences: ScoredExperience[]
@@ -128,12 +155,6 @@ export interface UnifiedSearchResult {
 
 /**
  * Search experiences using LanceDB vector similarity
- *
- * Implements Doc 22 §Part 4 (lines 915-937)
- *
- * @param query - Search query text
- * @param queryEmbedding - Pre-computed query embedding (null if unavailable)
- * @param limit - Maximum results to return
  */
 export async function searchExperiencesLance(
   query: string,
@@ -141,13 +162,11 @@ export async function searchExperiencesLance(
   limit: number = 10
 ): Promise<ScoredExperience[]> {
   if (!queryEmbedding) {
-    // No embedding available - skip experience search
-    log.debug("skipping experience search - no embedding")
+    log.warn("skipping experience search — no embedding available")
     return []
   }
 
   try {
-    // Ensure database is initialized
     await initializeMemorySystem()
 
     const table = await getExperiencesTable()
@@ -156,11 +175,8 @@ export async function searchExperiencesLance(
       .limit(limit)
       .toArray()
 
-    // Convert to ScoredExperience format
     return results.map((exp) => {
       const experience = exp as unknown as Experience & { _distance?: number }
-      // LanceDB returns _distance (lower is better), convert to score (higher is better)
-      // Using 1 / (1 + distance) to convert distance to similarity score
       const score = 1 / (1 + (experience._distance ?? 1))
 
       return {
@@ -183,15 +199,6 @@ export async function searchExperiencesLance(
 
 /**
  * Search insights using LanceDB vector similarity
- *
- * Implements Doc 22 §Part 4 (lines 939-961)
- *
- * Results are weighted by confidence score.
- *
- * @param query - Search query text
- * @param queryEmbedding - Pre-computed query embedding (null if unavailable)
- * @param minConfidence - Minimum confidence threshold (default: 0.3)
- * @param limit - Maximum results to return
  */
 export async function searchInsightsLance(
   query: string,
@@ -200,28 +207,23 @@ export async function searchInsightsLance(
   limit: number = 5
 ): Promise<ScoredInsight[]> {
   if (!queryEmbedding) {
-    // No embedding available - skip insight search
-    log.debug("skipping insight search - no embedding")
+    log.warn("skipping insight search — no embedding available")
     return []
   }
 
   try {
-    // Ensure database is initialized
     await initializeMemorySystem()
 
     const table = await getInsightsTable()
 
-    // Search with confidence filter
     const results = await table
       .search(queryEmbedding)
       .where(`confidence > ${minConfidence}`)
       .limit(limit)
       .toArray()
 
-    // Convert to ScoredInsight format with confidence weighting
     return results.map((ins) => {
       const insight = ins as unknown as Insight & { _distance?: number }
-      // Convert distance to similarity and weight by confidence
       const baseSimilarity = 1 / (1 + (insight._distance ?? 1))
       const score = baseSimilarity * insight.confidence
 
@@ -241,10 +243,9 @@ export async function searchInsightsLance(
 }
 
 // =============================================================================
-// Reciprocal Rank Fusion
+// Reciprocal Rank Fusion (kept for potential future use)
 // =============================================================================
 
-/** Input for RRF fusion */
 interface RRFInput {
   results: ScoredItem[]
   weight: number
@@ -252,18 +253,11 @@ interface RRFInput {
 }
 
 /**
- * Reciprocal Rank Fusion - combines ranked lists from different sources
+ * Reciprocal Rank Fusion - combines ranked lists from different sources.
  *
- * Implements Doc 22 §Part 4 (lines 1003-1030)
- *
- * RRF works across different scoring systems because it operates on
- * ranked positions, not raw scores. This makes it ideal for combining
- * results from different sources (tools, experiences, insights).
- *
- * IDs are prefixed by type: "tool:nmap", "exp:exp_123", "ins:ins_456"
- *
- * @param resultSets - Array of result sets with weights and types
- * @param k - RRF constant (default: 60, standard value)
+ * Kept for backwards compatibility but no longer used in the main
+ * unifiedSearch() path. Tools are now the primary ranked list with
+ * experiences and insights as annotations.
  */
 export function reciprocalRankFusion(
   resultSets: RRFInput[],
@@ -276,7 +270,6 @@ export function reciprocalRankFusion(
       const item = results[rank]
       const prefixedId = `${type}:${item.id}`
 
-      // RRF formula: weight * 1 / (k + rank + 1)
       const rrf = weight * (1 / (k + rank + 1))
 
       const existing = scores.get(prefixedId)
@@ -293,8 +286,93 @@ export function reciprocalRankFusion(
     }
   }
 
-  // Sort by RRF score descending
   return Array.from(scores.values()).sort((a, b) => b.score - a.score)
+}
+
+// =============================================================================
+// Annotation Builder (Cross-Table Architecture)
+// =============================================================================
+
+/** Weight for insight score adjustments */
+const INSIGHT_BOOST_WEIGHT = 0.15
+const INSIGHT_PENALIZE_WEIGHT = 0.10
+const EXPERIENCE_SUCCESS_BOOST = 0.05
+const EXPERIENCE_FAILURE_PENALTY = 0.03
+
+/**
+ * Build annotations for tool results from experiences and insights.
+ *
+ * For each tool:
+ * - Matching insights (prefer/over) → boost or penalize
+ * - Matching experiences (tool_selected) → evidence annotations
+ */
+function buildAnnotatedTools(
+  toolResults: ScoredTool[],
+  experiences: ScoredExperience[],
+  insights: ScoredInsight[]
+): AnnotatedToolResult[] {
+  return toolResults.map((tool) => {
+    const annotations: AnnotatedToolResult = {
+      tool: tool.id,
+      name: tool.name,
+      baseScore: tool.score,
+      adjustedScore: tool.score,
+      suggestedMethod: tool.suggestedMethod,
+      experiences: [],
+      insights: [],
+    }
+
+    // Insight adjustments
+    for (const insight of insights) {
+      if (insight.suggestion.prefer === tool.id) {
+        // This tool is preferred by the insight → boost
+        const boost = insight.confidence * INSIGHT_BOOST_WEIGHT
+        annotations.adjustedScore += boost
+        annotations.insights.push({
+          rule: insight.rule,
+          confidence: insight.confidence,
+          effect: "boost",
+        })
+      } else if (insight.suggestion.over === tool.id) {
+        // This tool is the one to avoid → penalize
+        const penalty = insight.confidence * INSIGHT_PENALIZE_WEIGHT
+        annotations.adjustedScore -= penalty
+        annotations.insights.push({
+          rule: insight.rule,
+          confidence: insight.confidence,
+          effect: "penalize",
+        })
+      }
+    }
+
+    // Experience annotations
+    for (const exp of experiences) {
+      if (exp.action.tool_selected === tool.id) {
+        if (exp.outcome.success) {
+          annotations.adjustedScore += EXPERIENCE_SUCCESS_BOOST
+          annotations.experiences.push({
+            success: true,
+            summary: exp.outcome.result_summary.slice(0, 100),
+          })
+        } else {
+          annotations.adjustedScore -= EXPERIENCE_FAILURE_PENALTY
+          const annotation: ExperienceAnnotation = {
+            success: false,
+            summary: exp.outcome.failure_reason ?? exp.outcome.result_summary.slice(0, 100),
+          }
+          if (exp.outcome.recovery?.worked) {
+            annotation.recovery = {
+              tool: exp.outcome.recovery.tool,
+              method: exp.outcome.recovery.method,
+            }
+          }
+          annotations.experiences.push(annotation)
+        }
+      }
+    }
+
+    return annotations
+  })
 }
 
 // =============================================================================
@@ -303,15 +381,6 @@ export function reciprocalRankFusion(
 
 /**
  * Format detailed score explanation for --explain flag
- *
- * Implements Doc 22 §Part 4 (lines 1036-1082)
- *
- * Shows why each tool received its ranking, including:
- * - Base similarity score
- * - Routing bonuses (triggers, use_for)
- * - Routing penalties (never_use_for)
- * - Context bonuses (phase match, recent success)
- * - Context penalties (already tried)
  */
 export function formatExplanation(
   query: string,
@@ -322,37 +391,35 @@ export function formatExplanation(
 ): string {
   const lines: string[] = [`\n## Score Breakdown for: "${query}"\n`]
 
-  // Tool explanations
   if (toolResults.length > 0) {
     lines.push("### Tool Scores\n")
     for (const tool of toolResults.slice(0, 5)) {
       const parts: string[] = []
 
-      // Base score
-      parts.push(`- Base keyword score: ${tool.score.toFixed(2)}`)
+      parts.push(`- Base score: ${tool.score.toFixed(3)}`)
 
-      // Phase bonus
-      if (context.phase && tool.phases?.includes(context.phase)) {
-        parts.push(`- Phase match (${context.phase}): included in base`)
+      if (tool.suggestedMethod) {
+        parts.push(`- Suggested method: ${tool.suggestedMethod}`)
       }
 
-      // Already tried penalty
+      if (context.phase && tool.phases?.includes(context.phase)) {
+        parts.push(`- Phase match (${context.phase}): boost applied`)
+      }
+
       if (context.toolsTried?.includes(tool.id)) {
         parts.push(`- Note: Already tried this session`)
       }
 
-      // Recency bonus
       if (context.recentSuccesses?.includes(tool.id)) {
         parts.push(`- Recent success this session: boost applied`)
       }
 
-      lines.push(`**${tool.name}** (score: ${tool.score.toFixed(2)})`)
+      lines.push(`**${tool.name}** (score: ${tool.score.toFixed(3)})`)
       lines.push(parts.join("\n"))
       lines.push("")
     }
   }
 
-  // Experience explanations
   if (experienceResults.length > 0) {
     lines.push("### Relevant Experiences\n")
     for (const exp of experienceResults.slice(0, 3)) {
@@ -368,7 +435,6 @@ export function formatExplanation(
     lines.push("")
   }
 
-  // Insight explanations
   if (insightResults.length > 0) {
     lines.push("### Applicable Insights\n")
     for (const ins of insightResults.slice(0, 3)) {
@@ -387,7 +453,7 @@ export function formatExplanation(
 }
 
 // =============================================================================
-// Unified Result Formatting
+// Result Formatting
 // =============================================================================
 
 /**
@@ -435,18 +501,13 @@ export function formatInsightForDisplay(ins: ScoredInsight): string {
 // =============================================================================
 
 /**
- * Unified search across tools, experiences, and insights
+ * Unified search — annotation model.
  *
- * Implements Doc 22 §Part 4 (lines 831-864)
- *
- * This function:
- * 1. Embeds the query (if embedding service available)
- * 2. Searches all sources in parallel
- * 3. Combines results using Reciprocal Rank Fusion
- * 4. Formats output with optional explanation
+ * Tools are primary results (pre-scored from method-level search).
+ * Experiences and insights annotate and adjust tool scores.
  *
  * @param query - Search query
- * @param toolResults - Pre-computed tool results (from YAML registry search)
+ * @param toolResults - Pre-scored tool results from tool-registry-search.ts
  * @param context - Search context (phase, tools tried, etc.)
  * @param explain - Whether to include detailed explanation
  */
@@ -458,7 +519,7 @@ export async function unifiedSearch(
 ): Promise<UnifiedSearchResult> {
   log.info("unified search", { query, explain, toolCount: toolResults.length })
 
-  // 1. Get query embedding (if available)
+  // 1. Get query embedding
   const embeddingService = getEmbeddingService()
   const embedding = await embeddingService.embed(query)
   const queryEmbedding = embedding?.dense ?? null
@@ -476,25 +537,33 @@ export async function unifiedSearch(
     embeddingAvailable: queryEmbedding !== null,
   })
 
-  // 3. Combine with Reciprocal Rank Fusion
-  // Weights from Doc 22: tools=1.0, experiences=0.8, insights=1.2
-  const combined = reciprocalRankFusion([
-    { results: toolResults, weight: 1.0, type: "tool" },
-    { results: experienceResults, weight: 0.8, type: "experience" },
-    { results: insightResults, weight: 1.2, type: "insight" },
-  ])
+  // 3. Build annotations and adjust tool scores
+  const annotatedTools = buildAnnotatedTools(toolResults, experienceResults, insightResults)
 
-  // 4. Build result
+  // 4. Re-sort by adjusted score
+  annotatedTools.sort((a, b) => b.adjustedScore - a.adjustedScore)
+
+  // 5. Build backwards-compatible RankedItem results
+  // Tools only — experiences and insights are annotations, not peer results
+  const combined: RankedItem[] = annotatedTools.map((at) => ({
+    id: `tool:${at.tool}`,
+    score: at.adjustedScore,
+    type: "tool" as ResultType,
+    data: toolResults.find((t) => t.id === at.tool)!,
+  }))
+
+  // 6. Build result
   const result: UnifiedSearchResult = {
     query,
     results: combined,
+    annotatedTools,
     tools: toolResults,
     experiences: experienceResults,
     insights: insightResults,
     embeddingAvailable: queryEmbedding !== null,
   }
 
-  // 5. Add explanation if requested
+  // 7. Add explanation if requested
   if (explain) {
     result.explanation = formatExplanation(
       query,
@@ -509,32 +578,39 @@ export async function unifiedSearch(
 }
 
 /**
- * Format unified search results for display
+ * Format unified search results for display.
  *
- * Creates a markdown-formatted output that includes:
- * - Tool recommendations
- * - Relevant past experiences
- * - Applicable insights
+ * Shows tool annotations (insights and experiences) as nested evidence.
  */
 export function formatUnifiedResults(result: UnifiedSearchResult): string {
   const lines: string[] = []
 
-  // Add experience section if we have relevant experiences
-  if (result.experiences.length > 0) {
-    lines.push("\n### Relevant Experience (from past engagements)\n")
-    for (const exp of result.experiences.slice(0, 2)) {
-      lines.push(`> ${formatExperienceForDisplay(exp)}`)
+  // Show annotated tools with evidence
+  const toolsWithEvidence = result.annotatedTools.filter(
+    (at) => at.insights.length > 0 || at.experiences.length > 0
+  )
+
+  if (toolsWithEvidence.length > 0) {
+    lines.push("\n### Evidence from Past Engagements\n")
+
+    for (const at of toolsWithEvidence) {
+      // Insight annotations
+      for (const ins of at.insights) {
+        const confidence = (ins.confidence * 100).toFixed(0)
+        const effect = ins.effect === "boost" ? "↑" : "↓"
+        lines.push(`> ${effect} **${at.name}** — Insight (${confidence}%): ${ins.rule}`)
+      }
+
+      // Experience annotations
+      for (const exp of at.experiences) {
+        const status = exp.success ? "✓" : "✗"
+        const recovery = exp.recovery
+          ? ` → recovered with ${exp.recovery.tool}:${exp.recovery.method}`
+          : ""
+        lines.push(`> ${status} **${at.name}**: ${exp.summary}${recovery}`)
+      }
     }
     lines.push("")
-  }
-
-  // Add insight section if we have applicable insights
-  if (result.insights.length > 0) {
-    lines.push("### Insights\n")
-    for (const ins of result.insights.slice(0, 2)) {
-      lines.push(formatInsightForDisplay(ins))
-      lines.push("")
-    }
   }
 
   // Add explanation if present
@@ -543,7 +619,7 @@ export function formatUnifiedResults(result: UnifiedSearchResult): string {
   }
 
   // Note if embedding wasn't available
-  if (!result.embeddingAvailable && (result.experiences.length === 0 && result.insights.length === 0)) {
+  if (!result.embeddingAvailable && result.experiences.length === 0 && result.insights.length === 0) {
     lines.push("\n*Note: Semantic search unavailable. Results based on keyword matching only.*\n")
   }
 

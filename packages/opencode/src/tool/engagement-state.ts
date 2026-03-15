@@ -88,6 +88,40 @@ const FailedAttemptSchema = z.object({
   timestamp: z.string().optional(),
 }).passthrough()
 
+const ToolFailureSchema = z.object({
+  tool: z.string(),
+  method: z.string().optional(),
+  error: z.string(),
+  count: z.number().default(1),
+  firstSeen: z.string(),
+  lastSeen: z.string(),
+  argsSummary: z.string().optional(),
+}).passthrough()
+
+const AttackStepSchema = z.object({
+  step: z.number(),
+  description: z.string(),
+  source: z.string().optional(),
+  status: z.enum(["pending", "in_progress", "completed", "failed", "skipped"]).default("pending"),
+  notes: z.string().optional(),
+}).passthrough()
+
+const AttackPlanSchema = z.object({
+  title: z.string(),
+  source: z.string(),
+  steps: z.array(AttackStepSchema),
+}).passthrough()
+
+const ToolSearchCacheEntrySchema = z.object({
+  query: z.string(),
+  phase: z.string().optional(),
+  results: z.array(z.object({
+    tool: z.string(),
+    method: z.string().optional(),
+  })),
+  timestamp: z.string(),
+}).passthrough()
+
 const TargetInfoSchema = z.object({
   ip: z.string(),
   hostname: z.string().optional(),
@@ -102,6 +136,9 @@ const EngagementStateSchema = z.object({
   sessions: z.array(SessionInfoSchema).optional(),
   files: z.array(FileInfoSchema).optional(),
   failedAttempts: z.array(FailedAttemptSchema).optional(),
+  toolFailures: z.array(ToolFailureSchema).optional(),
+  attackPlan: AttackPlanSchema.optional(),
+  toolSearchCache: z.array(ToolSearchCacheEntrySchema).optional(),
   accessLevel: z.enum(["none", "user", "root"]).optional(),
   flags: z.array(z.string()).optional(),
 }).passthrough()
@@ -178,7 +215,7 @@ export async function loadEngagementState(sessionID: string): Promise<Engagement
   }
 }
 
-async function saveEngagementState(sessionID: string, state: EngagementState): Promise<void> {
+export async function saveEngagementState(sessionID: string, state: EngagementState): Promise<void> {
   // Ensure session directory exists before writing
   await ensureSessionDir(sessionID)
 
@@ -409,13 +446,49 @@ export function mergeState(existing: EngagementState, updates: Partial<Engagemen
         // Dedupe flags (simple strings)
         const merged = [...new Set([...existingArray, ...value])]
         ;(result as any)[key] = merged
+      } else if (key === "toolFailures") {
+        // Dedup by tool+method, increment count
+        // To clear all failures, use resetToolFailures: true (not an empty array)
+        const merged = [...existingArray]
+        for (const item of value) {
+          const idx = merged.findIndex(
+            (f: any) => f.tool === item.tool && (f.method || "") === (item.method || "")
+          )
+          if (idx !== -1) {
+            merged[idx] = {
+              ...merged[idx],
+              count: (merged[idx].count || 1) + 1,
+              lastSeen: item.lastSeen || new Date().toISOString(),
+              error: item.error,
+            }
+          } else {
+            merged.push(item)
+          }
+        }
+        (result as any)[key] = merged
+      } else if (key === "toolSearchCache") {
+        // Dedup by query (case-insensitive), cap at 20
+        const merged = [...existingArray]
+        for (const item of value) {
+          const idx = merged.findIndex(
+            (c: any) => c.query.toLowerCase().trim() === item.query.toLowerCase().trim()
+          )
+          if (idx !== -1) {
+            merged[idx] = item
+          } else {
+            merged.push(item)
+          }
+        }
+        (result as any)[key] = merged.slice(-20)
       } else {
         // For other arrays (vulnerabilities, files, failedAttempts), just append
         (result as any)[key] = [...existingArray, ...value]
       }
     } else if (typeof value === "object" && !Array.isArray(value)) {
-      // Merge objects recursively
-      if (typeof existingValue === "object" && !Array.isArray(existingValue)) {
+      // attackPlan uses replace semantics (not recursive merge)
+      if (key === "attackPlan") {
+        (result as any)[key] = value
+      } else if (typeof existingValue === "object" && !Array.isArray(existingValue)) {
         (result as any)[key] = { ...existingValue, ...value }
       } else {
         (result as any)[key] = value
@@ -488,6 +561,7 @@ const UpdateParametersSchema = z.object({
   failedAttempts: z.array(FailedAttemptSchema).optional().describe("Failed attempts to record"),
   accessLevel: z.enum(["none", "user", "root"]).optional().describe("Update access level"),
   flags: z.array(z.string()).optional().describe("Captured flags to add"),
+  resetToolFailures: z.boolean().optional().describe("Set to true to clear ALL tool failure counters, unblocking skipped tools"),
 }).passthrough()
 
 export const UpdateEngagementStateTool = Tool.define("update_engagement_state", {
@@ -511,6 +585,11 @@ export const UpdateEngagementStateTool = Tool.define("update_engagement_state", 
 
     // Merge updates
     const newState = mergeState(existingState, params)
+
+    // Handle resetToolFailures boolean shortcut
+    if (params.resetToolFailures === true) {
+      newState.toolFailures = []
+    }
 
     // Save updated state
     await saveEngagementState(sessionID, newState)
@@ -536,6 +615,7 @@ export const UpdateEngagementStateTool = Tool.define("update_engagement_state", 
     if (params.failedAttempts?.length) updates.push(`failedAttempts: +${params.failedAttempts.length}`)
     if (params.accessLevel) updates.push(`accessLevel: ${params.accessLevel}`)
     if (params.flags?.length) updates.push(`flags: +${params.flags.length}`)
+    if (params.resetToolFailures === true) updates.push(`toolFailures: CLEARED`)
 
     const summary = updates.length > 0 ? updates.join(", ") : "no changes"
 
@@ -652,21 +732,74 @@ export async function getEngagementStateForInjection(sessionID: string): Promise
       return null
     }
 
+    const sections: string[] = []
+
+    // RC2: Port accessibility summary (prepend — most actionable info first)
+    if (Array.isArray(state.ports) && state.ports.length > 0) {
+      const open = state.ports.filter((p: any) => p.state === "open" || !p.state)
+      const filtered = state.ports.filter((p: any) => p.state === "filtered")
+
+      const portLines: string[] = ["### Port Accessibility"]
+      if (open.length > 0) {
+        portLines.push("**OPEN:** " + open.map(
+          (p: any) => `${p.port}/${p.protocol || "tcp"} (${p.service || "unknown"})`
+        ).join(", "))
+      }
+      if (filtered.length > 0) {
+        portLines.push("**FILTERED (blocked, do NOT target):** " +
+          filtered.map((p: any) => `${p.port}/${p.protocol || "tcp"}`).join(", "))
+      }
+      sections.push(portLines.join("\n"))
+    }
+
+    // RC5: Attack plan
+    const plan = (state as any).attackPlan
+    if (plan && Array.isArray(plan.steps)) {
+      const planLines: string[] = [
+        `### Attack Plan: ${plan.title}`,
+        `Source: ${plan.source}`,
+        "",
+      ]
+      for (const step of plan.steps) {
+        const marker = ({ pending: "[ ]", in_progress: "[>]", completed: "[x]", failed: "[!]", skipped: "[-]" } as Record<string, string>)[step.status] || "[ ]"
+        planLines.push(`${marker} Step ${step.step}: ${step.description}${step.source ? ` (${step.source})` : ""}`)
+        if (step.notes) planLines.push(`    Notes: ${step.notes}`)
+      }
+      planLines.push("")
+      planLines.push("**Follow this plan. Deviations require justification in TVAR reasoning.**")
+      sections.push(planLines.join("\n"))
+    }
+
+    // Core: YAML state dump
     const stateYaml = yaml.dump(state, {
       indent: 2,
       lineWidth: 120,
       noRefs: true,
     })
+    sections.push("## Current Engagement State\n\nThe following discoveries have been made by other agents. Use this information and avoid repeating failed attempts.\n\n```yaml\n" + stateYaml + "```")
 
-    return [
-      "## Current Engagement State",
-      "",
-      "The following discoveries have been made by other agents. Use this information and avoid repeating failed attempts.",
-      "",
-      "```yaml",
-      stateYaml,
-      "```",
-    ].join("\n")
+    // RC1: Broken tools warning
+    const toolFailures = (state as any).toolFailures
+    if (Array.isArray(toolFailures) && toolFailures.length > 0) {
+      const warnings = toolFailures
+        .filter((f: any) => (f.count || 0) >= 2)
+        .map((f: any) => `- **${f.tool}${f.method ? '.' + f.method : ''}**: ${f.error} (failed ${f.count}x)`)
+      if (warnings.length > 0) {
+        sections.push("### BROKEN TOOLS (Do NOT retry — find alternatives via tool_registry_search)\n\n" + warnings.join("\n"))
+      }
+    }
+
+    // RC6: Tool search cache
+    const cache = (state as any).toolSearchCache
+    if (Array.isArray(cache) && cache.length > 0) {
+      const cacheLines = cache.slice(-10).map((e: any) => {
+        const tools = (e.results || []).map((r: any) => `${r.tool}${r.method ? '.' + r.method : ''}`).join(", ")
+        return `- "${e.query}" → ${tools}`
+      })
+      sections.push("### Recent Tool Searches (use results directly, avoid re-searching)\n\n" + cacheLines.join("\n"))
+    }
+
+    return sections.join("\n\n")
   } catch (error) {
     log.error("Failed to get engagement state for injection", { error })
     return null

@@ -1,119 +1,116 @@
 /**
- * Tool Registry Storage in LanceDB
+ * Tool Registry Storage in LanceDB — Method-Level Rows
+ *
+ * Schema v7.0: Each row represents a single (tool, method) pair.
+ * A tool with 9 methods produces 9 rows, each with method-specific
+ * search_text, method_vector, and sparse_json.
  *
  * Stores tool registry data in LanceDB with support for:
- * - Pre-built .lance archives (with BGE-M3 vectors + FTS index from CI)
+ * - Pre-built .lance archives (with BGE-M3 dense + sparse vectors from CI)
  * - YAML fallback (plaintext import with client-side FTS, no vectors)
  * - Hash-based freshness (SHA-256 content hash replaces version-based sync)
  *
  * Search modes:
- * - Hybrid (FTS + vector via RRF) when pre-built vectors available
+ * - Hybrid (FTS + vector + sparse via custom scoring) when pre-built vectors available
  * - FTS-only when imported from YAML (no embedding server needed)
  * - Keyword fallback when neither FTS nor vectors available
  */
 
 import * as lancedb from "@lancedb/lancedb"
-import { Schema, Field, Utf8, Float32, FixedSizeList } from "apache-arrow"
 import { Log } from "@/util/log"
 import { getConnection, OPENSPLOIT_LANCE_PATH } from "./database"
-import { VECTOR_DIMENSIONS } from "./schema"
+import { VECTOR_DIMENSIONS, type MethodRow } from "./schema"
 import * as fs from "fs/promises"
 import * as path from "path"
 
 const log = Log.create({ service: "memory.tools" })
 
 // =============================================================================
-// Schema
+// Schema (reference only — actual schema inferred from data/CI archive)
 // =============================================================================
 
 /**
- * Tools table schema — plaintext + optional vectors.
+ * Tools table schema — method-level rows.
  *
- * Pre-built .lance archives include search_text (FTS indexed) and
- * tool_vector (BGE-M3 1024-dim). YAML fallback populates search_text
- * but leaves tool_vector null.
+ * Pre-built .lance archives include search_text (FTS indexed),
+ * method_vector (BGE-M3 1024-dim), and sparse_json (BGE-M3 sparse weights).
+ * YAML fallback populates search_text but no vectors.
  *
- * Note: This schema is not used for table creation — importFromLance()
- * file-copies the CI-built table, and importFromYAML() lets LanceDB
- * infer the schema from data rows. It serves as a type reference and
- * documentation of the expected column layout.
+ * Note: This is exported for reference; importFromLance() file-copies
+ * the CI-built table, and importFromYAML() lets LanceDB infer schema.
  */
-export const toolSchema = new Schema([
-  new Field("id", new Utf8(), false),                // tool ID (e.g., "nmap")
-  new Field("name", new Utf8(), false),              // display name
-  new Field("description", new Utf8(), false),       // tool description
-  new Field("version", new Utf8(), true),            // tool version
-  new Field("image", new Utf8(), true),              // Docker image
-  new Field("phases_json", new Utf8(), false),       // JSON array of phases
-  new Field("capabilities_json", new Utf8(), false), // JSON array of capabilities
-  new Field("routing_json", new Utf8(), false),      // JSON: { use_for, triggers, never_use_for, prefer_over }
-  new Field("methods_json", new Utf8(), false),      // JSON: { methodName: MethodDef }
-  new Field("requirements_json", new Utf8(), true),  // JSON: { network, privileged, ... }
-  new Field("resources_json", new Utf8(), true),     // JSON: { memory_mb, cpu }
-  new Field("raw_json", new Utf8(), false),          // Full tool entry as JSON for reconstruction
-  new Field("search_text", new Utf8(), false),       // Concatenated searchable text for FTS
-  new Field("registry_hash", new Utf8(), false),     // SHA-256 content hash for freshness
-])
+export { type MethodRow } from "./schema"
 
 export const TOOLS_TABLE_NAME = "tools"
 
-// =============================================================================
-// Types
-// =============================================================================
-
-/** Row in the tools table */
-export interface ToolRow {
-  id: string
-  name: string
-  description: string
-  version: string
-  image: string
-  phases_json: string
-  capabilities_json: string
-  routing_json: string
-  methods_json: string
-  requirements_json: string
-  resources_json: string
-  raw_json: string
-  search_text: string
-  registry_hash: string
-  tool_vector?: number[]
-}
+// Re-export the old ToolRow name for backwards compatibility
+export type ToolRow = MethodRow
 
 // =============================================================================
-// Search Text Builder
+// Schema (kept for toolSchema export compatibility)
+// =============================================================================
+
+import { Schema, Field, Utf8, Float32, FixedSizeList } from "apache-arrow"
+
+export const toolSchema = new Schema([
+  new Field("id", new Utf8(), false),                // "tool_id:method_name"
+  new Field("tool_id", new Utf8(), false),
+  new Field("method_name", new Utf8(), false),
+  new Field("tool_name", new Utf8(), false),
+  new Field("tool_description", new Utf8(), false),
+  new Field("method_description", new Utf8(), false),
+  new Field("when_to_use", new Utf8(), true),
+  new Field("search_text", new Utf8(), false),
+  new Field("phases_json", new Utf8(), false),
+  new Field("capabilities_json", new Utf8(), false),
+  new Field("routing_json", new Utf8(), false),
+  new Field("methods_json", new Utf8(), false),
+  new Field("requirements_json", new Utf8(), true),
+  new Field("resources_json", new Utf8(), true),
+  new Field("raw_json", new Utf8(), false),
+  new Field("see_also_json", new Utf8(), true),
+  new Field("registry_hash", new Utf8(), false),
+  new Field("sparse_json", new Utf8(), true),
+])
+
+// =============================================================================
+// Method-Level Search Text Builder
 // =============================================================================
 
 /**
- * Build concatenated search text for FTS indexing.
+ * Build focused per-method search text for FTS indexing.
  *
- * Includes: name, description, capabilities, method descriptions,
- * method when_to_use, and routing.use_for phrases.
+ * ~100-300 chars per method vs ~1200 chars per tool. BM25 naturally
+ * weights routing signals higher because there's less dilution.
  *
  * IMPORTANT: This logic is duplicated in the CI build script at
- * mcp-tools/scripts/build-registry-lance.py:build_search_text().
+ * mcp-tools/scripts/build-registry-lance.py:build_method_search_text().
  * Both must stay in sync for consistent FTS results between
  * CI-built indexes and YAML-fallback client-built indexes.
  */
-function buildSearchText(tool: Record<string, any>): string {
-  const parts: string[] = [
-    tool.name ?? "",
-    tool.description ?? "",
-    ...(tool.capabilities ?? []),
-  ]
+export function buildMethodSearchText(
+  tool: Record<string, any>,
+  methodName: string,
+  method: Record<string, any>
+): string {
+  const parts: string[] = []
 
-  // Method names, descriptions, and when_to_use
-  if (tool.methods) {
-    for (const [methodName, method] of Object.entries(tool.methods as Record<string, any>)) {
-      parts.push(methodName)
-      parts.push(method.description ?? "")
-      if (method.when_to_use) {
-        parts.push(method.when_to_use)
-      }
-    }
+  // Tool name for context
+  parts.push(tool.name ?? "")
+
+  // Method identity
+  parts.push(methodName)
+
+  // Method-specific documentation
+  parts.push(method.description ?? "")
+  if (method.when_to_use) {
+    parts.push(method.when_to_use)
   }
 
-  // Routing use_for phrases (high-signal for search)
+  // Tool description (brief context)
+  parts.push(tool.description ?? "")
+
+  // Routing use_for phrases (high-signal)
   const routing = tool.routing ?? {}
   for (const phrase of routing.use_for ?? []) {
     parts.push(phrase)
@@ -129,14 +126,12 @@ function buildSearchText(tool: Record<string, any>): string {
 /**
  * Import tools from a pre-built .lance tar.gz archive.
  *
- * The archive is produced by CI (build-registry-lance.py) and contains:
- * - Plaintext fields (id, name, description, etc.)
- * - search_text with pre-built FTS index
- * - tool_vector with BGE-M3 1024-dim embeddings
+ * The archive is produced by CI (build-registry-lance.py) and contains
+ * method-level rows with:
+ * - Plaintext fields (tool_id, method_name, search_text, etc.)
+ * - method_vector with BGE-M3 1024-dim embeddings
+ * - sparse_json with BGE-M3 learned sparse weights
  * - registry_hash for freshness checks
- *
- * Extracts the archive, then replaces the tools table in the active
- * LanceDB database by dropping and re-importing from the extracted data.
  *
  * @param tarPath - Path to registry.lance.tar.gz
  * @param registryHash - Expected hash (for verification)
@@ -165,8 +160,6 @@ export async function importFromLance(
   }
 
   // Copy the table directly into the main LanceDB directory.
-  // This avoids the read-convert-write cycle which crashes Bun due to
-  // Arrow Vector memory issues with bulk row conversion.
   const mainToolsDir = path.join(OPENSPLOIT_LANCE_PATH, "tools.lance")
   try {
     await fs.rm(mainToolsDir, { recursive: true, force: true })
@@ -198,8 +191,8 @@ export async function importFromLance(
     )
   }
 
-  // Check if vectors are present
-  const hasVectors = firstRow.tool_vector != null
+  // Check if vectors are present (method_vector for v7.0)
+  const hasVecs = firstRow.method_vector != null
 
   // Recreate FTS index (compatible with TS client)
   try {
@@ -217,7 +210,7 @@ export async function importFromLance(
   log.info("imported_tools_from_lance", {
     count,
     hash: registryHash.slice(0, 16),
-    hasVectors,
+    hasVectors: hasVecs,
   })
 
   return { imported: count }
@@ -231,8 +224,8 @@ export async function importFromLance(
  * Import tools from parsed YAML registry into LanceDB.
  *
  * This is the fallback path when .lance archives are unavailable.
- * Creates search_text on client side and builds FTS index.
- * No vectors (tool_vector is omitted) — FTS-only search.
+ * Creates method-level rows with search_text on client side and builds FTS index.
+ * No vectors — FTS-only search.
  *
  * @param registryTools - Record<toolId, toolData> from parsed YAML
  * @param registryHash - SHA-256 hash of registry content
@@ -244,25 +237,67 @@ export async function importFromYAML(
   const db = await getConnection()
   const existingTables = await db.tableNames()
 
-  // Build rows with client-side search_text
-  const rows: Omit<ToolRow, "tool_vector">[] = []
+  // Build method-level rows
+  const rows: Omit<MethodRow, "method_vector" | "sparse_json">[] = []
   for (const [toolId, tool] of Object.entries(registryTools)) {
-    rows.push({
-      id: toolId,
-      name: tool.name ?? toolId,
-      description: tool.description ?? "",
-      version: tool.version ?? "",
-      image: tool.image ?? "",
-      phases_json: JSON.stringify(tool.phases ?? []),
-      capabilities_json: JSON.stringify(tool.capabilities ?? []),
-      routing_json: JSON.stringify(tool.routing ?? {}),
-      methods_json: JSON.stringify(tool.methods ?? {}),
-      requirements_json: JSON.stringify(tool.requirements ?? {}),
-      resources_json: JSON.stringify(tool.resources ?? {}),
-      raw_json: JSON.stringify(tool),
-      search_text: buildSearchText(tool),
-      registry_hash: registryHash,
-    })
+    const methods = tool.methods ?? {}
+    const toolJson = JSON.stringify(tool)
+    const phasesJson = JSON.stringify(tool.phases ?? [])
+    const capabilitiesJson = JSON.stringify(tool.capabilities ?? [])
+    const routingJson = JSON.stringify(tool.routing ?? {})
+    const methodsJson = JSON.stringify(methods)
+    const requirementsJson = JSON.stringify(tool.requirements ?? {})
+    const resourcesJson = JSON.stringify(tool.resources ?? {})
+    const seeAlsoJson = JSON.stringify(tool.see_also ?? [])
+
+    const methodEntries = Object.entries(methods as Record<string, any>)
+
+    if (methodEntries.length === 0) {
+      // Tool with no methods — single "default" row
+      const searchText = buildMethodSearchText(tool, "default", { description: tool.description ?? "" })
+      rows.push({
+        id: `${toolId}:default`,
+        tool_id: toolId,
+        method_name: "default",
+        tool_name: tool.name ?? toolId,
+        tool_description: tool.description ?? "",
+        method_description: tool.description ?? "",
+        when_to_use: "",
+        search_text: searchText,
+        phases_json: phasesJson,
+        capabilities_json: capabilitiesJson,
+        routing_json: routingJson,
+        methods_json: methodsJson,
+        requirements_json: requirementsJson,
+        resources_json: resourcesJson,
+        raw_json: toolJson,
+        see_also_json: seeAlsoJson,
+        registry_hash: registryHash,
+      })
+    } else {
+      for (const [methodName, method] of methodEntries) {
+        const searchText = buildMethodSearchText(tool, methodName, method)
+        rows.push({
+          id: `${toolId}:${methodName}`,
+          tool_id: toolId,
+          method_name: methodName,
+          tool_name: tool.name ?? toolId,
+          tool_description: tool.description ?? "",
+          method_description: method.description ?? "",
+          when_to_use: method.when_to_use ?? "",
+          search_text: searchText,
+          phases_json: phasesJson,
+          capabilities_json: capabilitiesJson,
+          routing_json: routingJson,
+          methods_json: methodsJson,
+          requirements_json: requirementsJson,
+          resources_json: resourcesJson,
+          raw_json: toolJson,
+          see_also_json: seeAlsoJson,
+          registry_hash: registryHash,
+        })
+      }
+    }
   }
 
   if (rows.length === 0) {
@@ -299,6 +334,10 @@ export async function importFromYAML(
 
 /**
  * Load all tools from LanceDB and reconstruct them into the Registry format.
+ *
+ * Method-level rows share the same tool_id and raw_json.
+ * Deduplicate by tool_id — parse raw_json once per tool.
+ *
  * Returns null if the tools table doesn't exist or is empty.
  */
 export async function loadRegistry(): Promise<{
@@ -314,22 +353,26 @@ export async function loadRegistry(): Promise<{
     }
 
     const table = await db.openTable(TOOLS_TABLE_NAME)
-    // LanceDB v0.15.0 defaults to limit(10); use explicit high limit to get all tools
+    // Method-level table may have ~254 rows; use explicit high limit
     const results = await table.query().limit(10000).toArray()
 
     if (results.length === 0) {
       return null
     }
 
-    // Reconstruct registry format
+    // Deduplicate by tool_id (multiple method rows per tool)
     const tools: Record<string, any> = {}
     let hash = ""
+    const seenToolIds = new Set<string>()
 
     for (const row of results) {
-      const toolId = row.id as string
-      const rawJson = row.raw_json as string
+      const toolId = row.tool_id as string
       hash = row.registry_hash as string
 
+      if (seenToolIds.has(toolId)) continue
+      seenToolIds.add(toolId)
+
+      const rawJson = row.raw_json as string
       try {
         tools[toolId] = JSON.parse(rawJson)
       } catch {
@@ -343,6 +386,7 @@ export async function loadRegistry(): Promise<{
 
     log.info("loaded_tools_from_lancedb", {
       count: Object.keys(tools).length,
+      rows: results.length,
       hash: hash.slice(0, 16),
     })
 
@@ -389,6 +433,8 @@ export async function needsUpdate(remoteHash: string): Promise<boolean> {
 /**
  * Check if the tools table has pre-built vectors (from .lance import).
  * Returns false if table doesn't exist or has no vectors.
+ *
+ * Checks for method_vector (v7.0 schema) or tool_vector (v6.1 legacy).
  */
 export async function hasVectors(): Promise<boolean> {
   try {
@@ -400,7 +446,8 @@ export async function hasVectors(): Promise<boolean> {
     const results = await table.query().limit(1).toArray()
     if (results.length === 0) return false
 
-    return results[0].tool_vector != null
+    // v7.0 uses method_vector; v6.1 legacy uses tool_vector
+    return results[0].method_vector != null || results[0].tool_vector != null
   } catch {
     return false
   }

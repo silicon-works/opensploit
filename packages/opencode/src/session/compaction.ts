@@ -14,6 +14,7 @@ import { fn } from "@/util/fn"
 import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
+import { Todo } from "./todo"
 
 export namespace SessionCompaction {
   const log = Log.create({ service: "session.compaction" })
@@ -133,11 +134,31 @@ export namespace SessionCompaction {
       model,
       abort: input.abort,
     })
+    // Inject objective and todo state into compaction context
+    const session = await Session.get(input.sessionID)
+    const todos = await Todo.get(input.sessionID)
+    const contextParts: string[] = []
+
+    if (session.objective) {
+      contextParts.push(
+        `CRITICAL — PRESERVE IN SUMMARY:\nThis agent's assigned objective is: "${session.objective}"\nThe agent MUST stay within this scope. Include this objective verbatim in the summary.`,
+      )
+    }
+
+    if (todos.length > 0) {
+      const todoSnapshot = todos
+        .map((t) => `- [${t.status}] ${t.content}`)
+        .join("\n")
+      contextParts.push(
+        `TASK PROGRESS — PRESERVE IN SUMMARY:\nThe agent's task list at time of compaction:\n${todoSnapshot}\nInclude this task list with status markers in the summary. Tasks marked [completed] are DONE and must not be repeated. Tasks marked [in_progress] or [pending] are what remain.`,
+      )
+    }
+
     // Allow plugins to inject context or replace compaction prompt
     const compacting = await Plugin.trigger(
       "experimental.session.compacting",
       { sessionID: input.sessionID },
-      { context: [], prompt: undefined },
+      { context: contextParts, prompt: undefined },
     )
     const defaultPrompt =
       "Provide a detailed prompt for continuing our conversation above. Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next considering new session will not have access to our conversation."
@@ -175,13 +196,29 @@ export namespace SessionCompaction {
         agent: userMessage.agent,
         model: userMessage.model,
       })
+      const continueParts: string[] = []
+      if (session.objective) {
+        continueParts.push(`Continue your assigned task: ${session.objective}`)
+        continueParts.push("Stay within your assigned scope — do not perform work outside this objective.")
+      }
+      if (todos.length > 0) {
+        const todoSnapshot = todos
+          .map((t) => `- [${t.status}] ${t.content}`)
+          .join("\n")
+        continueParts.push(`Task progress at last checkpoint:\n${todoSnapshot}`)
+        continueParts.push("Resume from where you left off. Do not repeat completed tasks.")
+      }
+      const continueText = continueParts.length > 0
+        ? continueParts.join("\n\n")
+        : "Continue if you have next steps"
+
       await Session.updatePart({
         id: Identifier.ascending("part"),
         messageID: continueMsg.id,
         sessionID: input.sessionID,
         type: "text",
         synthetic: true,
-        text: "Continue if you have next steps",
+        text: continueText,
         time: {
           start: Date.now(),
           end: Date.now(),

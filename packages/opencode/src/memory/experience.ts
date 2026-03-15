@@ -25,6 +25,7 @@ import {
   VECTOR_DIMENSIONS,
   type Experience,
 } from "./schema"
+import { serializeSparse } from "./sparse"
 import {
   type ToolContext,
   type PreviousFailure,
@@ -199,6 +200,7 @@ export async function recordExperience(
   const experienceRecord = createExperience({
     ...experienceInput,
     vector: embedding?.dense ?? Array(VECTOR_DIMENSIONS).fill(0),
+    sparse_json: serializeSparse(embedding?.sparse ?? null),
   })
 
   // Check for semantic duplicates (cosine similarity > 0.92)

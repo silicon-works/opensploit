@@ -12,7 +12,7 @@ import { defer } from "@/util/defer"
 import { Config } from "../config/config"
 import { PermissionNext } from "@/permission/next"
 import { getEngagementStateForInjection } from "./engagement-state"
-import { registerRootSession } from "../session/hierarchy"
+import { registerRootSession, hasParent } from "../session/hierarchy"
 import * as SessionDirectory from "../session/directory"
 import { Log } from "../util/log"
 
@@ -99,6 +99,12 @@ export const TaskTool = Tool.define("task", async (ctx) => {
 
       // Find root session for hierarchy tracking and state sharing
       const rootSessionID = await getRootSessionID(ctx.sessionID)
+
+      // Pentest sub-agents get TodoWrite + depth-limited task spawning
+      const isPentest = isPentestSubagent(params.subagent_type)
+      // First-level pentest sub-agents (spawned by master) can spawn further pentest/* agents.
+      // Second-level (spawned by sub-agents) cannot — they are leaf agents.
+      const canChildSpawn = isPentest && !hasParent(ctx.sessionID)
       const sessionDirRule = {
         permission: "external_directory",
         pattern: path.join(SessionDirectory.get(rootSessionID), "*"),
@@ -114,24 +120,20 @@ export const TaskTool = Tool.define("task", async (ctx) => {
         return await Session.create({
           parentID: ctx.sessionID,
           title: params.description + ` (@${agent.name} subagent)`,
+          objective: params.prompt,
           permission: [
-            {
-              permission: "todowrite",
-              pattern: "*",
-              action: "deny",
-            },
-            {
-              permission: "todoread",
-              pattern: "*",
-              action: "deny",
-            },
-            // Always deny task for subagents - prevents nested subagent chains
-            // This matches backup branch behavior that prevented doom loops
-            {
-              permission: "task" as const,
-              pattern: "*" as const,
-              action: "deny" as const,
-            },
+            // TodoWrite/TodoRead: enabled for pentest sub-agents, denied for others
+            ...(isPentest ? [] : [
+              { permission: "todowrite", pattern: "*", action: "deny" as const },
+              { permission: "todoread", pattern: "*", action: "deny" as const },
+            ]),
+            // Task spawning: allow pentest/* for first-level sub-agents, deny for deeper
+            ...(canChildSpawn ? [
+              { permission: "task" as const, pattern: "*" as const, action: "deny" as const },
+              { permission: "task" as const, pattern: "pentest/*" as const, action: "allow" as const },
+            ] : [
+              { permission: "task" as const, pattern: "*" as const, action: "deny" as const },
+            ]),
             sessionDirRule,
             ...(config.experimental?.primary_tools?.map((t) => ({
               pattern: "*",
@@ -195,7 +197,6 @@ export const TaskTool = Tool.define("task", async (ctx) => {
       // allowing them to benefit from shared context when spawned in a pentest tree.
 
       let enrichedPrompt = params.prompt
-      const isPentest = isPentestSubagent(params.subagent_type)
 
       // Check if we should inject context:
       // 1. Always for pentest/* subagents
@@ -212,8 +213,15 @@ export const TaskTool = Tool.define("task", async (ctx) => {
         const sessionDir = SessionDirectory.get(rootSessionID)
 
         // Build enriched prompt with context
+        const spawnInfo = canChildSpawn
+          ? "You CAN spawn pentest/* sub-agents for focused sub-tasks."
+          : "You are a leaf agent — you CANNOT spawn sub-agents. Work within your context."
+
         enrichedPrompt = `## Session Directory
 ${sessionDir}
+
+## Delegation
+${spawnInfo}
 
 ${engagementState ?? "No engagement state yet. Use \`update_engagement_state\` to record discoveries."}
 
@@ -241,9 +249,8 @@ ${params.prompt}`
         },
         agent: agent.name,
         tools: {
-          todowrite: false,
-          todoread: false,
-          task: false, // Always disable task for subagents - prevents nested subagent chains
+          ...(isPentest ? {} : { todowrite: false, todoread: false }),
+          ...(canChildSpawn ? {} : { task: false }),
           ...Object.fromEntries((config.experimental?.primary_tools ?? []).map((t) => [t, false])),
         },
         parts: promptParts,
