@@ -7,8 +7,20 @@ import { Font } from "@opencode-ai/ui/font"
 import "@ibm/plex/css/ibm-plex.css"
 import "./app.css"
 import { LanguageProvider } from "~/context/language"
-import { I18nProvider } from "~/context/i18n"
+import { I18nProvider, useI18n } from "~/context/i18n"
 import { strip } from "~/lib/language"
+
+function AppMeta() {
+  const i18n = useI18n()
+  return (
+    <>
+      <Title>OpenSploit</Title>
+      <Meta name="description" content={i18n.t("app.meta.description")} />
+      <Favicon />
+      <Font />
+    </>
+  )
+}
 
 export default function App() {
   return (
@@ -19,10 +31,7 @@ export default function App() {
         <LanguageProvider>
           <I18nProvider>
             <MetaProvider>
-              <Title>OpenSploit</Title>
-              <Meta name="description" content="OpenSploit - The open source offensive security agent." />
-              <Favicon />
-              <Font />
+              <AppMeta />
               <Suspense>{props.children}</Suspense>
             </MetaProvider>
           </I18nProvider>

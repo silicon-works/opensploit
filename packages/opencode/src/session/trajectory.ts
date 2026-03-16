@@ -29,6 +29,7 @@ import { Session } from "."
 import { Storage } from "@/storage/storage"
 import { Log } from "@/util/log"
 import type { Phase } from "./tvar-parser"
+import type { SessionID } from "./schema"
 
 const log = Log.create({ service: "trajectory" })
 
@@ -236,7 +237,7 @@ export namespace Trajectory {
    * Extract trajectory from a session by aggregating TVAR parts
    */
   export async function fromSession(sessionID: string): Promise<Data | null> {
-    const messages = await Session.messages({ sessionID })
+    const messages = await Session.messages({ sessionID: sessionID as SessionID })
     if (messages.length === 0) return null
 
     const steps: Step[] = []
@@ -369,7 +370,7 @@ export namespace Trajectory {
    * Helper: Get all child sessions recursively (for fromSessionTree)
    */
   async function getChildSessionsRecursiveForTree(sessionID: string): Promise<Session.Info[]> {
-    const children = await Session.children(sessionID)
+    const children = await Session.children(sessionID as SessionID)
     const all: Session.Info[] = [...children]
     for (const child of children) {
       const grandchildren = await getChildSessionsRecursiveForTree(child.id)
@@ -605,7 +606,7 @@ ${step.action ? `<action>\n${step.action}\n</action>\n\n` : ""}${step.result ? `
    * Get all child sessions recursively
    */
   async function getChildSessionsRecursive(sessionID: string): Promise<Session.Info[]> {
-    const children = await Session.children(sessionID)
+    const children = await Session.children(sessionID as SessionID)
     const all: Session.Info[] = [...children]
     for (const child of children) {
       const grandchildren = await getChildSessionsRecursive(child.id)
@@ -649,7 +650,7 @@ ${step.action ? `<action>\n${step.action}\n</action>\n\n` : ""}${step.result ? `
     },
   ): Promise<void> {
     agentSet.add(agentName)
-    const messages = await Session.messages({ sessionID })
+    const messages = await Session.messages({ sessionID: sessionID as SessionID })
 
     for (const msg of messages) {
       for (const part of msg.parts) {
@@ -737,7 +738,7 @@ ${step.action ? `<action>\n${step.action}\n</action>\n\n` : ""}${step.result ? `
     let endTime: number | undefined
 
     // Get root session info
-    const rootSession = await Session.get(rootSessionID)
+    const rootSession = await Session.get(rootSessionID as SessionID)
     if (rootSession.time.created) startTime = rootSession.time.created
     if (rootSession.time.updated) endTime = rootSession.time.updated
 

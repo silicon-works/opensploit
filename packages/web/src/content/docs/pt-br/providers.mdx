@@ -1,17 +1,17 @@
 ---
 title: Provedores
-description: Usando qualquer provedor LLM no OpenCode.
+description: Usando qualquer provedor LLM no opencode.
 ---
 
 import config from "../../../../config.mjs"
 export const console = config.console
 
-OpenCode usa o [AI SDK](https://ai-sdk.dev/) e [Models.dev](https://models.dev) para suportar **75+ provedores LLM** e suporta a execução de modelos locais.
+opencode usa o [AI SDK](https://ai-sdk.dev/) e [Models.dev](https://models.dev) para suportar **75+ provedores LLM** e suporta a execução de modelos locais.
 
 Para adicionar um provedor, você precisa:
 
 1. Adicionar as chaves da API para o provedor usando o comando `/connect`.
-2. Configurar o provedor na sua configuração do OpenCode.
+2. Configurar o provedor na sua configuração do opencode.
 
 ---
 
@@ -23,7 +23,7 @@ Quando você adiciona as chaves da API de um provedor com o comando `/connect`, 
 
 ### Configuração
 
-Você pode personalizar os provedores através da seção `provider` na sua configuração do OpenCode.
+Você pode personalizar os provedores através da seção `provider` na sua configuração do opencode.
 
 ---
 
@@ -48,13 +48,13 @@ Você pode personalizar a URL base para qualquer provedor definindo a opção `b
 
 ## OpenCode Zen
 
-OpenCode Zen é uma lista de modelos fornecidos pela equipe do OpenCode que foram testados e verificados para funcionar bem com o OpenCode. [Saiba mais](/docs/zen).
+OpenCode Zen é uma lista de modelos fornecidos pela equipe do opencode que foram testados e verificados para funcionar bem com o opencode. [Saiba mais](/docs/zen).
 
 :::tip
 Se você é novo, recomendamos começar com o OpenCode Zen.
 :::
 
-1. Execute o comando `/connect` no TUI, selecione opencode e acesse [opencode.ai/auth](https://opencode.ai/auth).
+1. Execute o comando `/connect` no TUI, selecione `OpenCode Zen` e acesse [opencode.ai/zen](https://opencode.ai/zen).
 
    ```txt
    /connect
@@ -65,7 +65,7 @@ Se você é novo, recomendamos começar com o OpenCode Zen.
 3. Cole sua chave da API.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -77,7 +77,39 @@ Se você é novo, recomendamos começar com o OpenCode Zen.
    /models
    ```
 
-Funciona como qualquer outro provedor no OpenCode e é completamente opcional.
+Funciona como qualquer outro provedor no opencode e é completamente opcional.
+
+---
+
+## OpenCode Go
+
+OpenCode Go é um plano de assinatura de baixo custo que fornece acesso confiável a modelos de codificação abertos populares fornecidos pela equipe do opencode que foram
+testados e verificados para funcionar bem com o opencode.
+
+1. Execute o comando `/connect` no TUI, selecione `OpenCode Go` e acesse [opencode.ai/zen](https://opencode.ai/zen).
+
+   ```txt
+   /connect
+   ```
+
+2. Faça login, adicione seus dados de cobrança e copie sua chave da API.
+
+3. Cole sua chave da API.
+
+   ```txt
+   ┌ API key
+   │
+   │
+   └ enter
+   ```
+
+4. Execute `/models` no TUI para ver a lista de modelos que recomendamos.
+
+   ```txt
+   /models
+   ```
+
+Funciona como qualquer outro provedor no opencode e é completamente opcional.
 
 ---
 
@@ -104,7 +136,7 @@ Não vê um provedor aqui? Envie um PR.
 3. Insira sua chave da API 302.AI.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -120,7 +152,7 @@ Não vê um provedor aqui? Envie um PR.
 
 ### Amazon Bedrock
 
-Para usar o Amazon Bedrock com o OpenCode:
+Para usar o Amazon Bedrock com o opencode:
 
 1. Acesse o **Catálogo de Modelos** no console do Amazon Bedrock e solicite acesso aos modelos que você deseja.
 
@@ -130,18 +162,20 @@ Para usar o Amazon Bedrock com o OpenCode:
 
 2. **Configure a autenticação** usando um dos seguintes métodos:
 
+   ***
+
    #### Variáveis de Ambiente (Início Rápido)
 
    Defina uma dessas variáveis de ambiente ao executar o opencode:
 
    ```bash
-   # Opção 1: Usando chaves de acesso da AWS
+   # Option 1: Using AWS access keys
    AWS_ACCESS_KEY_ID=XXX AWS_SECRET_ACCESS_KEY=YYY opencode
 
-   # Opção 2: Usando perfil nomeado da AWS
+   # Option 2: Using named AWS profile
    AWS_PROFILE=my-profile opencode
 
-   # Opção 3: Usando token bearer do Bedrock
+   # Option 3: Using Bedrock bearer token
    AWS_BEARER_TOKEN_BEDROCK=XXX opencode
    ```
 
@@ -151,6 +185,8 @@ Para usar o Amazon Bedrock com o OpenCode:
    export AWS_PROFILE=my-dev-profile
    export AWS_REGION=us-east-1
    ```
+
+   ***
 
    #### Arquivo de Configuração (Recomendado)
 
@@ -179,6 +215,8 @@ Para usar o Amazon Bedrock com o OpenCode:
    As opções do arquivo de configuração têm precedência sobre as variáveis de ambiente.
    :::
 
+   ***
+
    #### Avançado: Endpoints VPC
 
    Se você estiver usando endpoints VPC para Bedrock:
@@ -202,11 +240,15 @@ Para usar o Amazon Bedrock com o OpenCode:
    A opção `endpoint` é um alias para a opção genérica `baseURL`, usando terminologia específica da AWS. Se tanto `endpoint` quanto `baseURL` forem especificados, `endpoint` tem precedência.
    :::
 
+   ***
+
    #### Métodos de Autenticação
    - **`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`**: Crie um usuário IAM e gere chaves de acesso no Console da AWS
    - **`AWS_PROFILE`**: Use perfis nomeados de `~/.aws/credentials`. Primeiro configure com `aws configure --profile my-profile` ou `aws sso login`
    - **`AWS_BEARER_TOKEN_BEDROCK`**: Gere chaves de API de longo prazo no console do Amazon Bedrock
    - **`AWS_WEB_IDENTITY_TOKEN_FILE` / `AWS_ROLE_ARN`**: Para EKS IRSA (IAM Roles for Service Accounts) ou outros ambientes Kubernetes com federação OIDC. Essas variáveis de ambiente são injetadas automaticamente pelo Kubernetes ao usar anotações de conta de serviço.
+
+   ***
 
    #### Precedência de Autenticação
 
@@ -225,7 +267,8 @@ Para usar o Amazon Bedrock com o OpenCode:
    ```
 
 :::note
-Para perfis de inferência personalizados, use o nome do modelo e do provedor na chave e defina a propriedade `id` para o arn. Isso garante o cache correto:
+Para perfis de inferência personalizados, use o nome do modelo e do provedor na chave e defina a propriedade `id` para o arn. Isso garante o cache correto.
+:::
 
 ```json title="opencode.json"
 {
@@ -243,8 +286,6 @@ Para perfis de inferência personalizados, use o nome do modelo e do provedor na
 }
 ```
 
-:::
-
 ---
 
 ### Anthropic
@@ -258,11 +299,11 @@ Para perfis de inferência personalizados, use o nome do modelo e do provedor na
 2. Aqui você pode selecionar a opção **Claude Pro/Max** e isso abrirá seu navegador e pedirá para você se autenticar.
 
    ```txt
-   ┌ Selecionar método de autenticação
+   ┌ Selecione o método de autenticação
    │
    │ Claude Pro/Max
-   │ Criar uma chave da API
-   │ Inserir chave da API manualmente
+   │ Criar uma chave de API
+   │ Inserir manualmente a chave de API
    └
    ```
 
@@ -273,14 +314,14 @@ Para perfis de inferência personalizados, use o nome do modelo e do provedor na
    ```
 
 :::info
-Usar sua assinatura Claude Pro/Max no OpenCode não é oficialmente suportado pela [Anthropic](https://anthropic.com).
+Usar sua assinatura Claude Pro/Max no opencode não é oficialmente suportado pela [Anthropic](https://anthropic.com).
 :::
 
 ##### Usando chaves da API
 
-Você também pode selecionar **Criar uma chave da API** se não tiver uma assinatura Pro/Max. Isso também abrirá seu navegador e pedirá que você faça login na Anthropic e lhe dará um código que você pode colar no seu terminal.
+Você também pode selecionar **Criar uma chave de API** se não tiver uma assinatura Pro/Max. Isso também abrirá seu navegador e pedirá que você faça login na Anthropic e lhe dará um código que você pode colar no seu terminal.
 
-Ou, se você já tiver uma chave da API, pode selecionar **Inserir chave da API manualmente** e colá-la no seu terminal.
+Ou, se você já tiver uma chave da API, pode selecionar **Inserir manualmente a chave de API** e colá-la no seu terminal.
 
 ---
 
@@ -309,7 +350,7 @@ Se você encontrar erros "Desculpe, mas não posso ajudar com esse pedido", tent
 4. Insira sua chave da API.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -356,7 +397,7 @@ Se você encontrar erros "Desculpe, mas não posso ajudar com esse pedido", tent
 4. Insira sua chave da API.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -395,7 +436,7 @@ Se você encontrar erros "Desculpe, mas não posso ajudar com esse pedido", tent
 3. Insira sua chave da API Baseten.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -422,7 +463,7 @@ Se você encontrar erros "Desculpe, mas não posso ajudar com esse pedido", tent
 3. Insira sua chave da API Cerebras.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -445,8 +486,8 @@ O Cloudflare AI Gateway permite que você acesse modelos do OpenAI, Anthropic, W
 2. Defina seu ID de Conta e ID de Gateway como variáveis de ambiente.
 
    ```bash title="~/.bash_profile"
-   export CLOUDFLARE_ACCOUNT_ID=seu-id-de-conta-de-32-caracteres
-   export CLOUDFLARE_GATEWAY_ID=seu-id-de-gateway
+   export CLOUDFLARE_ACCOUNT_ID=your-32-character-account-id
+   export CLOUDFLARE_GATEWAY_ID=your-gateway-id
    ```
 
 3. Execute o comando `/connect` e procure por **Cloudflare AI Gateway**.
@@ -458,7 +499,7 @@ O Cloudflare AI Gateway permite que você acesse modelos do OpenAI, Anthropic, W
 4. Insira seu token da API do Cloudflare.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -467,7 +508,7 @@ O Cloudflare AI Gateway permite que você acesse modelos do OpenAI, Anthropic, W
    Ou defina como uma variável de ambiente.
 
    ```bash title="~/.bash_profile"
-   export CLOUDFLARE_API_TOKEN=seu-token-da-api
+   export CLOUDFLARE_API_TOKEN=your-api-token
    ```
 
 5. Execute o comando `/models` para selecionar um modelo.
@@ -507,7 +548,7 @@ O Cloudflare AI Gateway permite que você acesse modelos do OpenAI, Anthropic, W
 3. Insira sua chave da API Cortecs.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -534,7 +575,7 @@ O Cloudflare AI Gateway permite que você acesse modelos do OpenAI, Anthropic, W
 3. Insira sua chave da API DeepSeek.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -561,7 +602,7 @@ O Cloudflare AI Gateway permite que você acesse modelos do OpenAI, Anthropic, W
 3. Insira sua chave da API Deep Infra.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -588,7 +629,7 @@ O Cloudflare AI Gateway permite que você acesse modelos do OpenAI, Anthropic, W
 3. Insira sua chave da API Firmware.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -615,7 +656,7 @@ O Cloudflare AI Gateway permite que você acesse modelos do OpenAI, Anthropic, W
 3. Insira sua chave da API Fireworks AI.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -642,7 +683,7 @@ GitLab Duo fornece um chat agente com suporte a ferramentas nativas através do 
 2. Escolha seu método de autenticação:
 
    ```txt
-   ┌ Selecionar método de autenticação
+   ┌ Selecione o método de autenticação
    │
    │ OAuth (Recomendado)
    │ Token de Acesso Pessoal
@@ -679,8 +720,8 @@ armazenar o token no armazenamento de autenticação do opencode.
 ##### GitLab Auto-Hospedado
 
 :::note[nota de conformidade]
-OpenCode usa um pequeno modelo para algumas tarefas de IA, como gerar o título da sessão.
-Ele está configurado para usar gpt-5-nano por padrão, hospedado pela Zen. Para bloquear o OpenCode
+opencode usa um pequeno modelo para algumas tarefas de AI, como gerar o título da sessão.
+Ele está configurado para usar gpt-5-nano por padrão, hospedado pela Zen. Para bloquear o opencode
 para usar apenas sua própria instância hospedada do GitLab, adicione o seguinte ao seu
 arquivo `opencode.json`. Também é recomendado desativar o compartilhamento de sessões.
 
@@ -737,7 +778,7 @@ URL de callback `http://127.0.0.1:8080/callback` e os seguintes escopos:
 Em seguida, exponha o ID do aplicativo como variável de ambiente:
 
 ```bash
-export GITLAB_OAUTH_CLIENT_ID=seu_id_do_aplicativo_aqui
+export GITLAB_OAUTH_CLIENT_ID=your_application_id_here
 ```
 
 Mais documentação na página [opencode-gitlab-auth](https://www.npmjs.com/package/@gitlab/opencode-gitlab-auth).
@@ -784,8 +825,6 @@ Para usar sua assinatura do GitHub Copilot com o opencode:
 
 :::note
 Alguns modelos podem precisar de uma [assinatura Pro+](https://github.com/features/copilot/plans) para usar.
-
-Alguns modelos precisam ser habilitados manualmente nas suas [configurações do GitHub Copilot](https://docs.github.com/en/copilot/how-tos/use-ai-models/configure-access-to-ai-models#setup-for-individual-use).
 :::
 
 1. Execute o comando `/connect` e procure por GitHub Copilot.
@@ -801,9 +840,10 @@ Alguns modelos precisam ser habilitados manualmente nas suas [configurações do
    │
    │ https://github.com/login/device
    │
-   │ Insira o código: 8F43-6FCF
+   │ Digite o código: 8F43-6FCF
    │
-   └ Aguardando autorização...
+   │ Aguardando autorização...
+   └
    ```
 
 3. Agora execute o comando `/models` para selecionar o modelo que você deseja.
@@ -816,7 +856,7 @@ Alguns modelos precisam ser habilitados manualmente nas suas [configurações do
 
 ### Google Vertex AI
 
-Para usar o Google Vertex AI com o OpenCode:
+Para usar o Google Vertex AI com o opencode:
 
 1. Acesse o **Model Garden** no Console do Google Cloud e verifique os
    modelos disponíveis na sua região.
@@ -835,14 +875,14 @@ Para usar o Google Vertex AI com o OpenCode:
    Defina-as ao executar o opencode.
 
    ```bash
-   GOOGLE_APPLICATION_CREDENTIALS=/caminho/para/service-account.json GOOGLE_CLOUD_PROJECT=seu-id-do-projeto opencode
+   GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json GOOGLE_CLOUD_PROJECT=your-project-id opencode
    ```
 
    Ou adicione-as ao seu perfil bash.
 
    ```bash title="~/.bash_profile"
-   export GOOGLE_APPLICATION_CREDENTIALS=/caminho/para/service-account.json
-   export GOOGLE_CLOUD_PROJECT=seu-id-do-projeto
+   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+   export GOOGLE_CLOUD_PROJECT=your-project-id
    export VERTEX_LOCATION=global
    ```
 
@@ -871,7 +911,7 @@ A região `global` melhora a disponibilidade e reduz erros sem custo adicional. 
 3. Insira a chave da API para o provedor.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -900,7 +940,7 @@ A região `global` melhora a disponibilidade e reduz erros sem custo adicional. 
 3. Insira seu token do Hugging Face.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -916,7 +956,7 @@ A região `global` melhora a disponibilidade e reduz erros sem custo adicional. 
 
 ### Helicone
 
-[Helicone](https://helicone.ai) é uma plataforma de observabilidade LLM que fornece registro, monitoramento e análises para suas aplicações de IA. O Helicone AI Gateway roteia suas solicitações para o provedor apropriado automaticamente com base no modelo.
+[Helicone](https://helicone.ai) é uma plataforma de observabilidade LLM que fornece registro, monitoramento e análises para suas aplicações de AI. O Helicone AI Gateway roteia suas solicitações para o provedor apropriado automaticamente com base no modelo.
 
 1. Acesse [Helicone](https://helicone.ai), crie uma conta e gere uma chave da API a partir do seu painel.
 
@@ -929,7 +969,7 @@ A região `global` melhora a disponibilidade e reduz erros sem custo adicional. 
 3. Insira sua chave da API Helicone.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -961,8 +1001,8 @@ Aqui está o [Diretório de Modelos do Helicone](https://helicone.ai/models), vo
       },
       "models": {
         "gpt-4o": {
-          // ID do modelo (da página do diretório de modelos do Helicone)
-          "name": "GPT-4o", // Seu próprio nome personalizado para o modelo
+          // Model ID (from Helicone's model directory page)
+          "name": "GPT-4o", // Your own custom name for the model
         },
         "claude-sonnet-4-20250514": {
           "name": "Claude Sonnet 4",
@@ -998,7 +1038,7 @@ Helicone suporta cabeçalhos personalizados para recursos como cache, rastreamen
 
 ##### Rastreamento de Sessões
 
-O recurso [Sessões](https://docs.helicone.ai/features/sessions) do Helicone permite que você agrupe solicitações LLM relacionadas. Use o plugin [opencode-helicone-session](https://github.com/H2Shami/opencode-helicone-session) para registrar automaticamente cada conversa do OpenCode como uma sessão no Helicone.
+O recurso [Sessões](https://docs.helicone.ai/features/sessions) do Helicone permite que você agrupe solicitações LLM relacionadas. Use o plugin [opencode-helicone-session](https://github.com/H2Shami/opencode-helicone-session) para registrar automaticamente cada conversa do opencode como uma sessão no Helicone.
 
 ```bash
 npm install -g opencode-helicone-session
@@ -1012,7 +1052,7 @@ Adicione-o à sua configuração.
 }
 ```
 
-O plugin injeta os cabeçalhos `Helicone-Session-Id` e `Helicone-Session-Name` em suas solicitações. Na página de Sessões do Helicone, você verá cada conversa do OpenCode listada como uma sessão separada.
+O plugin injeta os cabeçalhos `Helicone-Session-Id` e `Helicone-Session-Name` em suas solicitações. Na página de Sessões do Helicone, você verá cada conversa do opencode listada como uma sessão separada.
 
 ##### Cabeçalhos Comuns do Helicone
 
@@ -1020,7 +1060,7 @@ O plugin injeta os cabeçalhos `Helicone-Session-Id` e `Helicone-Session-Name` e
 | -------------------------- | --------------------------------------------------------------------------- |
 | `Helicone-Cache-Enabled`   | Habilitar cache de resposta (`true`/`false`)                                |
 | `Helicone-User-Id`         | Rastrear métricas por usuário                                               |
-| `Helicone-Property-[Nome]` | Adicionar propriedades personalizadas (ex: `Helicone-Property-Environment`) |
+| `Helicone-Property-[Name]` | Adicionar propriedades personalizadas (ex: `Helicone-Property-Environment`) |
 | `Helicone-Prompt-Id`       | Associar solicitações com versões de prompt                                 |
 
 Consulte o [Diretório de Cabeçalhos do Helicone](https://docs.helicone.ai/helicone-headers/header-directory) para todos os cabeçalhos disponíveis.
@@ -1080,7 +1120,7 @@ IO.NET oferece 17 modelos otimizados para vários casos de uso:
 3. Insira sua chave da API IO.NET.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1143,7 +1183,7 @@ Para usar Kimi K2 do Moonshot AI:
 3. Insira sua chave da API Moonshot.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1170,7 +1210,7 @@ Para usar Kimi K2 do Moonshot AI:
 3. Insira sua chave da API MiniMax.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1197,7 +1237,7 @@ Para usar Kimi K2 do Moonshot AI:
 3. Insira sua chave da API Nebius Token Factory.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1216,7 +1256,7 @@ Para usar Kimi K2 do Moonshot AI:
 Você pode configurar o opencode para usar modelos locais através do Ollama.
 
 :::tip
-Ollama pode se configurar automaticamente para o OpenCode. Consulte a [documentação de integração do Ollama](https://docs.ollama.com/integrations/opencode) para detalhes.
+Ollama pode se configurar automaticamente para o opencode. Consulte a [documentação de integração do Ollama](https://docs.ollama.com/integrations/opencode) para detalhes.
 :::
 
 ```json title="opencode.json" "ollama" {5, 6, 8, 10-14}
@@ -1255,13 +1295,13 @@ Se chamadas de ferramentas não estiverem funcionando, tente aumentar `num_ctx` 
 
 ### Ollama Cloud
 
-Para usar o Ollama Cloud com o OpenCode:
+Para usar o Ollama Cloud com o opencode:
 
 1. Acesse [https://ollama.com/](https://ollama.com/) e faça login ou crie uma conta.
 
 2. Navegue até **Configurações** > **Chaves** e clique em **Adicionar Chave da API** para gerar uma nova chave da API.
 
-3. Copie a chave da API para uso no OpenCode.
+3. Copie a chave da API para uso no opencode.
 
 4. Execute o comando `/connect` e procure por **Ollama Cloud**.
 
@@ -1272,13 +1312,13 @@ Para usar o Ollama Cloud com o OpenCode:
 5. Insira sua chave da API do Ollama Cloud.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
    ```
 
-6. **Importante**: Antes de usar modelos em nuvem no OpenCode, você deve puxar as informações do modelo localmente:
+6. **Importante**: Antes de usar modelos em nuvem no opencode, você deve puxar as informações do modelo localmente:
 
    ```bash
    ollama pull gpt-oss:20b-cloud
@@ -1305,10 +1345,11 @@ Recomendamos se inscrever para [ChatGPT Plus ou Pro](https://chatgpt.com/pricing
 2. Aqui você pode selecionar a opção **ChatGPT Plus/Pro** e isso abrirá seu navegador e pedirá para você se autenticar.
 
    ```txt
-   ┌ Selecionar método de autenticação
+   ┌ Selecione o método de autenticação
    │
    │ ChatGPT Plus/Pro
-   │ Inserir chave da API manualmente
+   │ Inserir manualmente a chave de API
+   │
    └
    ```
 
@@ -1326,7 +1367,7 @@ Se você já tiver uma chave da API, pode selecionar **Inserir chave da API manu
 
 ### OpenCode Zen
 
-OpenCode Zen é uma lista de modelos testados e verificados fornecidos pela equipe do OpenCode. [Saiba mais](/docs/zen).
+OpenCode Zen é uma lista de modelos testados e verificados fornecidos pela equipe do opencode. [Saiba mais](/docs/zen).
 
 1. Faça login em **<a href={console}>OpenCode Zen</a>** e clique em **Criar Chave da API**.
 
@@ -1336,10 +1377,10 @@ OpenCode Zen é uma lista de modelos testados e verificados fornecidos pela equi
    /connect
    ```
 
-3. Insira sua chave da API do OpenCode.
+3. Insira sua chave da API do opencode.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1366,7 +1407,7 @@ OpenCode Zen é uma lista de modelos testados e verificados fornecidos pela equi
 3. Insira a chave da API para o provedor.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1436,7 +1477,7 @@ SAP AI Core fornece acesso a mais de 40 modelos do OpenAI, Anthropic, Google, Am
 3. Insira seu JSON da chave de serviço.
 
    ```txt
-   ┌ Chave de serviço
+   ┌ Service key
    │
    │
    └ enter
@@ -1457,7 +1498,7 @@ SAP AI Core fornece acesso a mais de 40 modelos do OpenAI, Anthropic, Google, Am
 4. Opcionalmente, defina o ID de implantação e o grupo de recursos:
 
    ```bash
-   AICORE_DEPLOYMENT_ID=seu-id-de-implantação AICORE_RESOURCE_GROUP=seu-grupo-de-recursos opencode
+   AICORE_DEPLOYMENT_ID=your-deployment-id AICORE_RESOURCE_GROUP=your-resource-group opencode
    ```
 
    :::note
@@ -1472,9 +1513,42 @@ SAP AI Core fornece acesso a mais de 40 modelos do OpenAI, Anthropic, Google, Am
 
 ---
 
+### STACKIT
+
+O STACKIT AI Model Serving fornece um ambiente de hospedagem soberano totalmente gerenciado para modelos de IA, com foco em LLMs como Llama, Mistral e Qwen, com máxima soberania de dados na infraestrutura europeia.
+
+1. Vá para o [Portal STACKIT](https://portal.stackit.cloud), navegue até **AI Model Serving** e crie um token de autenticação para o seu projeto.
+
+   :::tip
+   Você precisa de uma conta de cliente STACKIT, conta de usuário e projeto antes de criar tokens de autenticação.
+   :::
+
+2. Execute o comando `/connect` e procure por **STACKIT**.
+
+   ```txt
+   /connect
+   ```
+
+3. Insira seu token de autenticação do STACKIT AI Model Serving.
+
+   ```txt
+   ┌ API key
+   │
+   │
+   └ enter
+   ```
+
+4. Execute o comando `/models` para selecionar entre os modelos disponíveis, como _Qwen3-VL 235B_ ou _Llama 3.3 70B_.
+
+   ```txt
+   /models
+   ```
+
+---
+
 ### OVHcloud AI Endpoints
 
-1. Acesse o [painel OVHcloud](https://ovh.com/manager). Navegue até a seção `Nuvem Pública`, `IA & Aprendizado de Máquina` > `Endpoints de IA` e na aba `Chaves da API`, clique em **Criar uma nova chave da API**.
+1. Acesse o [painel OVHcloud](https://ovh.com/manager). Navegue até a seção `Public Cloud`, `AI & Machine Learning` > `AI Endpoints` e na aba `API Keys`, clique em **Criar uma nova chave da API**.
 
 2. Execute o comando `/connect` e procure por **OVHcloud AI Endpoints**.
 
@@ -1485,7 +1559,7 @@ SAP AI Core fornece acesso a mais de 40 modelos do OpenAI, Anthropic, Google, Am
 3. Insira sua chave da API OVHcloud AI Endpoints.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1501,7 +1575,7 @@ SAP AI Core fornece acesso a mais de 40 modelos do OpenAI, Anthropic, Google, Am
 
 ### Scaleway
 
-Para usar [APIs Generativas Scaleway](https://www.scaleway.com/en/docs/generative-apis/) com o Opencode:
+Para usar [APIs Generativas Scaleway](https://www.scaleway.com/en/docs/generative-apis/) com o opencode:
 
 1. Acesse as [configurações de IAM do Scaleway Console](https://console.scaleway.com/iam/api-keys) para gerar uma nova chave da API.
 
@@ -1514,7 +1588,7 @@ Para usar [APIs Generativas Scaleway](https://www.scaleway.com/en/docs/generativ
 3. Insira sua chave da API Scaleway.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1541,7 +1615,7 @@ Para usar [APIs Generativas Scaleway](https://www.scaleway.com/en/docs/generativ
 3. Insira sua chave da API Together AI.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1568,7 +1642,7 @@ Para usar [APIs Generativas Scaleway](https://www.scaleway.com/en/docs/generativ
 3. Insira sua chave da API Venice AI.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1597,7 +1671,7 @@ O Vercel AI Gateway permite que você acesse modelos do OpenAI, Anthropic, Googl
 3. Insira sua chave da API do Vercel AI Gateway.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1651,7 +1725,7 @@ Algumas opções de roteamento úteis:
 3. Insira sua chave da API xAI.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1680,7 +1754,7 @@ Algumas opções de roteamento úteis:
 3. Insira sua chave da API Z.AI.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1707,7 +1781,7 @@ Algumas opções de roteamento úteis:
 3. Insira a chave da API para o provedor.
 
    ```txt
-   ┌ Chave da API
+   ┌ API key
    │
    │
    └ enter
@@ -1741,7 +1815,7 @@ Algumas opções de roteamento úteis:
 Para adicionar qualquer provedor **compatível com OpenAI** que não esteja listado no comando `/connect`:
 
 :::tip
-Você pode usar qualquer provedor compatível com OpenAI com o opencode. A maioria dos provedores de IA modernos oferece APIs compatíveis com OpenAI.
+Você pode usar qualquer provedor compatível com OpenAI com o opencode. A maioria dos provedores de AI modernos oferece APIs compatíveis com OpenAI.
 :::
 
 1. Execute o comando `/connect` e role para baixo até **Outro**.
@@ -1751,9 +1825,9 @@ Você pode usar qualquer provedor compatível com OpenAI com o opencode. A maior
 
    ┌  Adicionar credencial
    │
-   ◆  Selecionar provedor
+   ◆  Select provider
    │  ...
-   │  ● Outro
+   │  ● Other
    └
    ```
 
@@ -1764,7 +1838,7 @@ Você pode usar qualquer provedor compatível com OpenAI com o opencode. A maior
 
    ┌  Adicionar credencial
    │
-   ◇  Insira o id do provedor
+   ◇  Enter provider id
    │  myprovider
    └
    ```
@@ -1780,9 +1854,9 @@ Você pode usar qualquer provedor compatível com OpenAI com o opencode. A maior
 
    ┌  Adicionar credencial
    │
-   ▲  Isso apenas armazena uma credencial para myprovider - você precisará configurá-la no opencode.json, verifique a documentação para exemplos.
+   ▲  Isso armazena apenas uma credencial para myprovider - você precisará configurá-lo no opencode.json, verifique a documentação para exemplos.
    │
-   ◇  Insira sua chave da API
+   ◇  Digite sua chave de API
    │  sk-...
    └
    ```
@@ -1810,7 +1884,7 @@ Você pode usar qualquer provedor compatível com OpenAI com o opencode. A maior
    ```
 
    Aqui estão as opções de configuração:
-   - **npm**: Pacote do SDK de IA a ser usado, `@ai-sdk/openai-compatible` para provedores compatíveis com OpenAI
+   - **npm**: Pacote do SDK de AI a ser usado, `@ai-sdk/openai-compatible` para provedores compatíveis com OpenAI
    - **name**: Nome de exibição na interface do usuário.
    - **models**: Modelos disponíveis.
    - **options.baseURL**: URL do endpoint da API.
@@ -1862,7 +1936,7 @@ Detalhes da configuração:
 - **limit.context**: Máximo de tokens de entrada que o modelo aceita.
 - **limit.output**: Máximo de tokens que o modelo pode gerar.
 
-Os campos `limit` permitem que o OpenCode entenda quanto contexto você tem disponível. Provedores padrão puxam isso automaticamente do models.dev.
+Os campos `limit` permitem que o opencode entenda quanto contexto você tem disponível. Provedores padrão puxam isso automaticamente do models.dev.
 
 ---
 

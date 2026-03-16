@@ -3,6 +3,7 @@ import DESCRIPTION from "./task.txt"
 import z from "zod"
 import path from "path"
 import { Session } from "../session"
+import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
 import { Identifier } from "../id/id"
 import { Agent } from "../agent/agent"
@@ -26,7 +27,7 @@ const log = Log.create({ service: "tool.task" })
 async function getRootSessionID(sessionID: string): Promise<string> {
   let currentID = sessionID
   while (true) {
-    const session = await Session.get(currentID)
+    const session = await Session.get(currentID as SessionID)
     if (!session.parentID) {
       return currentID
     }
@@ -113,7 +114,7 @@ export const TaskTool = Tool.define("task", async (ctx) => {
 
       const session = await iife(async () => {
         if (params.task_id) {
-          const found = await Session.get(params.task_id).catch(() => {})
+          const found = await Session.get(SessionID.make(params.task_id)).catch(() => {})
           if (found) return found
         }
 
@@ -149,8 +150,9 @@ export const TaskTool = Tool.define("task", async (ctx) => {
           (rule) => rule.permission === sessionDirRule.permission && rule.pattern === sessionDirRule.pattern,
         )
       ) {
-        await Session.update(session.id, (draft) => {
-          draft.permission = [...(draft.permission ?? []), sessionDirRule]
+        await Session.setPermission({
+          sessionID: session.id,
+          permission: [...(session.permission ?? []), sessionDirRule],
         })
       }
 
@@ -178,7 +180,7 @@ export const TaskTool = Tool.define("task", async (ctx) => {
         },
       })
 
-      const messageID = Identifier.ascending("message")
+      const messageID = MessageID.ascending()
 
       function cancel() {
         SessionPrompt.cancel(session.id)

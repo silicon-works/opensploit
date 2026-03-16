@@ -1,5 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test"
-import { Permission } from "../../src/permission"
+import { Ultrasploit } from "../../src/permission/ultrasploit"
+import { PermissionNext } from "../../src/permission/next"
 import {
   registerRootSession,
   getRootSession,
@@ -62,7 +63,7 @@ describe("permission.bubbling", () => {
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(false)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(false)
         },
       })
     })
@@ -72,9 +73,9 @@ describe("permission.bubbling", () => {
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          Permission.enableUltrasploit(rootSessionID)
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(true)
-          Permission.disableUltrasploit(rootSessionID)
+          Ultrasploit.enable(rootSessionID)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(true)
+          Ultrasploit.disable(rootSessionID)
         },
       })
     })
@@ -84,11 +85,11 @@ describe("permission.bubbling", () => {
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          Permission.enableUltrasploit(rootSessionID)
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(true)
+          Ultrasploit.enable(rootSessionID)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(true)
 
-          Permission.disableUltrasploit(rootSessionID)
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(false)
+          Ultrasploit.disable(rootSessionID)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(false)
         },
       })
     })
@@ -102,15 +103,15 @@ describe("permission.bubbling", () => {
           registerRootSession(childSessionID, rootSessionID)
 
           // Enable ultrasploit via child session
-          Permission.enableUltrasploit(childSessionID)
+          Ultrasploit.enable(childSessionID)
 
           // Should be enabled for root (since child maps to root)
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(true)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(true)
           // Should also return true when checking via child
-          expect(Permission.isUltrasploit(childSessionID)).toBe(true)
+          expect(Ultrasploit.isEnabled(childSessionID)).toBe(true)
 
           // Cleanup
-          Permission.disableUltrasploit(rootSessionID)
+          Ultrasploit.disable(rootSessionID)
           unregister(childSessionID)
         },
       })
@@ -126,15 +127,15 @@ describe("permission.bubbling", () => {
           registerRootSession(grandchildSessionID, rootSessionID)
 
           // Enable ultrasploit via grandchild session
-          Permission.enableUltrasploit(grandchildSessionID)
+          Ultrasploit.enable(grandchildSessionID)
 
           // Should be enabled for all sessions in tree
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(true)
-          expect(Permission.isUltrasploit(childSessionID)).toBe(true)
-          expect(Permission.isUltrasploit(grandchildSessionID)).toBe(true)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(true)
+          expect(Ultrasploit.isEnabled(childSessionID)).toBe(true)
+          expect(Ultrasploit.isEnabled(grandchildSessionID)).toBe(true)
 
           // Cleanup
-          Permission.disableUltrasploit(rootSessionID)
+          Ultrasploit.disable(rootSessionID)
           unregisterTree(rootSessionID)
         },
       })
@@ -149,13 +150,13 @@ describe("permission.bubbling", () => {
           registerRootSession(childSessionID, rootSessionID)
 
           // Enable via root
-          Permission.enableUltrasploit(rootSessionID)
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(true)
+          Ultrasploit.enable(rootSessionID)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(true)
 
           // Disable via child (should affect root)
-          Permission.disableUltrasploit(childSessionID)
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(false)
-          expect(Permission.isUltrasploit(childSessionID)).toBe(false)
+          Ultrasploit.disable(childSessionID)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(false)
+          expect(Ultrasploit.isEnabled(childSessionID)).toBe(false)
 
           // Cleanup
           unregister(childSessionID)
@@ -171,14 +172,14 @@ describe("permission.bubbling", () => {
           const otherRootID = "session_other_root_001"
 
           // Enable ultrasploit for our test tree
-          Permission.enableUltrasploit(rootSessionID)
+          Ultrasploit.enable(rootSessionID)
 
           // Other root should NOT have ultrasploit enabled
-          expect(Permission.isUltrasploit(otherRootID)).toBe(false)
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(true)
+          expect(Ultrasploit.isEnabled(otherRootID)).toBe(false)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(true)
 
           // Cleanup
-          Permission.disableUltrasploit(rootSessionID)
+          Ultrasploit.disable(rootSessionID)
         },
       })
     })
@@ -194,9 +195,9 @@ describe("permission.bubbling", () => {
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          const pending = Permission.pending()
+          const pending = await PermissionNext.list()
           expect(pending).toBeDefined()
-          expect(typeof pending).toBe("object")
+          expect(Array.isArray(pending)).toBe(true)
         },
       })
     })
@@ -206,7 +207,7 @@ describe("permission.bubbling", () => {
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          const list = Permission.list()
+          const list = await PermissionNext.list()
           expect(Array.isArray(list)).toBe(true)
         },
       })
@@ -226,16 +227,16 @@ describe("permission.bubbling", () => {
           // Set up hierarchy
           registerRootSession(childSessionID, rootSessionID)
 
-          Permission.enableUltrasploit(rootSessionID)
+          Ultrasploit.enable(rootSessionID)
 
           // Unregister child
           unregister(childSessionID)
 
           // Root should still have ultrasploit enabled
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(true)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(true)
 
           // Cleanup
-          Permission.disableUltrasploit(rootSessionID)
+          Ultrasploit.disable(rootSessionID)
         },
       })
     })
@@ -248,8 +249,8 @@ describe("permission.bubbling", () => {
           // Set up hierarchy
           registerRootSession(childSessionID, rootSessionID)
 
-          Permission.enableUltrasploit(rootSessionID)
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(true)
+          Ultrasploit.enable(rootSessionID)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(true)
 
           // Unregister entire tree
           unregisterTree(rootSessionID)
@@ -257,11 +258,11 @@ describe("permission.bubbling", () => {
           // Note: ultrasploit state is stored by root session ID, not in hierarchy
           // So it persists even after tree unregistration
           // This is intentional - cleanup should be explicit
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(true)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(true)
 
           // Explicit disable
-          Permission.disableUltrasploit(rootSessionID)
-          expect(Permission.isUltrasploit(rootSessionID)).toBe(false)
+          Ultrasploit.disable(rootSessionID)
+          expect(Ultrasploit.isEnabled(rootSessionID)).toBe(false)
         },
       })
     })

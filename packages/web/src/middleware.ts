@@ -1,13 +1,5 @@
 import { defineMiddleware } from "astro:middleware"
-import { matchLocale, localeAlias } from "./i18n/locales"
-
-function matchLocaleExact(value: string): string | null {
-  const key = value.toLowerCase()
-  if (key in localeAlias) {
-    return localeAlias[key as keyof typeof localeAlias]
-  }
-  return null
-}
+import { exactLocale, matchLocale } from "./i18n/locales"
 
 function docsAlias(pathname: string) {
   const hit = /^\/docs\/([^/]+)(\/.*)?$/.exec(pathname)
@@ -15,14 +7,33 @@ function docsAlias(pathname: string) {
 
   const value = hit[1] ?? ""
   const tail = hit[2] ?? ""
-  // Use exact locale matching for URL paths — not fuzzy startsWith matching.
-  // "troubleshooting" must not match "tr", "rules" must not match "ru".
-  const locale = matchLocaleExact(value)
+  const locale = exactLocale(value)
   if (!locale) return null
-  if (locale === "root") return `/docs${tail}`
-  if (value === locale) return null
 
-  return `/docs/${locale}${tail}`
+  const next = locale === "root" ? `/docs${tail}` : `/docs/${locale}${tail}`
+  if (next === pathname) return null
+  return {
+    path: next,
+    locale,
+  }
+}
+
+function cookie(locale: string) {
+  const value = locale === "root" ? "en" : locale
+  return `oc_locale=${encodeURIComponent(value)}; Path=/; Max-Age=31536000; SameSite=Lax`
+}
+
+function redirect(url: URL, path: string, locale?: string) {
+  const next = new URL(url.toString())
+  next.pathname = path
+  const headers = new Headers({
+    Location: next.toString(),
+  })
+  if (locale) headers.set("Set-Cookie", cookie(locale))
+  return new Response(null, {
+    status: 302,
+    headers,
+  })
 }
 
 function localeFromCookie(header: string | null) {
@@ -121,9 +132,7 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
 
   const alias = docsAlias(ctx.url.pathname)
   if (alias) {
-    const url = new URL(ctx.request.url)
-    url.pathname = alias
-    return ctx.redirect(url.toString(), 302)
+    return redirect(ctx.url, alias.path, alias.locale)
   }
 
   if (ctx.url.pathname !== "/docs" && ctx.url.pathname !== "/docs/") return next()
@@ -133,7 +142,5 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
     localeFromAcceptLanguage(ctx.request.headers.get("accept-language"))
   if (!locale || locale === "root") return next()
 
-  const url = new URL(ctx.request.url)
-  url.pathname = `/docs/${locale}/`
-  return ctx.redirect(url.toString(), 302)
+  return redirect(ctx.url, `/docs/${locale}/`)
 })
