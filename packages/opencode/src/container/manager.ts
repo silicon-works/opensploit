@@ -26,6 +26,7 @@ export namespace ContainerManager {
     clockOffset?: string // libfaketime offset this container was started with
     callMutex: CallMutex // Serialize concurrent calls to the same stdio pipe
     activeCalls: number // Number of in-flight tool calls (skip idle timeout when > 0)
+    idleTimeout?: number // Per-container override (milliseconds) from registry idle_timeout
   }
 
   /**
@@ -207,6 +208,8 @@ export namespace ContainerManager {
     clockOffset?: string
     /** Docker resource limits from registry */
     resources?: { memory_mb?: number; cpu?: number }
+    /** Per-tool idle timeout override in milliseconds (from registry idle_timeout) */
+    idleTimeout?: number
   }
 
   /**
@@ -409,6 +412,7 @@ export namespace ContainerManager {
       clockOffset: options?.clockOffset,
       callMutex: new CallMutex(),
       activeCalls: 0,
+      idleTimeout: options?.idleTimeout,
     }
 
     containers.set(toolName, managed)
@@ -505,8 +509,9 @@ export namespace ContainerManager {
           continue
         }
 
-        if (now - container.lastUsed > IDLE_TIMEOUT_MS) {
-          log.info("stopping idle container", { toolName, idleMs: now - container.lastUsed })
+        const timeout = container.idleTimeout || IDLE_TIMEOUT_MS
+        if (now - container.lastUsed > timeout) {
+          log.info("stopping idle container", { toolName, idleMs: now - container.lastUsed, timeoutMs: timeout })
           stopContainer(toolName).catch((error) => {
             log.error("error stopping idle container", { toolName, error: String(error) })
           })

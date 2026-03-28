@@ -69,6 +69,7 @@ interface RegistryTool {
   use_service?: string // Use network from this service (e.g., "vpn")
   see_also?: Array<{ tool: string; reason: string }>
   resources?: { memory_mb?: number; cpu?: number }
+  idle_timeout?: number // Per-tool idle timeout in seconds (from registry)
 }
 
 interface Registry {
@@ -459,6 +460,7 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
             timeout: timeoutMs,
             clockOffset: clock_offset,
             resources: toolDef.resources,
+            idleTimeout: toolDef.idle_timeout ? toolDef.idle_timeout * 1000 : undefined,
           }
         )
       }
