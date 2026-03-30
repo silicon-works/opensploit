@@ -262,14 +262,13 @@ export const McpToolInvoke = Tool.define("mcp_tool", {
       }
     }
 
-    // Check if method exists
+    // Method not in published registry — may be a dynamic recipe loaded at runtime.
+    // Let the container handle validation; its error message lists all available methods
+    // (including dynamically loaded recipes). Tool name is already validated above.
     if (toolDef.methods && !toolDef.methods[method]) {
-      const availableMethods = Object.keys(toolDef.methods).join(", ")
-      return {
-        output: `Method "${method}" not found on tool "${toolName}".\n\nAvailable methods: ${availableMethods}`,
-        title: `Error: Method not found`,
-        metadata: { tool: toolName, method, success: false, error: "Method not found" },
-      }
+      log.info(
+        `Method "${method}" not in registry for "${toolName}", forwarding to container`,
+      )
     }
 
     // Timeout chain: agent-specified > tool-level registry default > 300s system default

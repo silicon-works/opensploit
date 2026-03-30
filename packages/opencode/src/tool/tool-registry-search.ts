@@ -8,6 +8,8 @@ import yaml from "js-yaml"
 import * as lancedb from "@lancedb/lancedb"
 import { Log } from "../util/log"
 import { getRootSession } from "../session/hierarchy"
+import * as SessionDirectory from "../session/directory"
+import { readdirSync, statSync, readFileSync, existsSync } from "fs"
 import {
   updateSearchContext,
   getToolContext,
@@ -452,6 +454,71 @@ async function getRegistry(): Promise<GetRegistryResult> {
   }
 
   throw new Error("Registry unavailable. Check network connection and try 'opensploit update'.")
+}
+
+// =============================================================================
+// Dynamic Recipe Merging
+// =============================================================================
+
+/**
+ * Merge dynamic recipes from /session/tool_recipes/ into the registry.
+ * This allows tool_registry_search to discover methods defined by the build
+ * agent at runtime (e.g., impacket-dacledit recipe).
+ *
+ * Mutates registry.tools in place for efficiency.
+ */
+function mergeSessionRecipes(registry: Registry, sessionID: string): void {
+  try {
+    const rootSessionID = getRootSession(sessionID)
+    const sessionDir = SessionDirectory.get(rootSessionID)
+    const recipesDir = path.join(sessionDir, "tool_recipes")
+
+    if (!existsSync(recipesDir)) return
+
+    for (const toolDir of readdirSync(recipesDir)) {
+      const toolPath = path.join(recipesDir, toolDir)
+      try {
+        if (!statSync(toolPath).isDirectory()) continue
+      } catch {
+        continue
+      }
+
+      // Only merge into tools that exist in the registry
+      if (!registry.tools[toolDir]) continue
+
+      for (const file of readdirSync(toolPath)) {
+        if (!file.endsWith(".yaml") && !file.endsWith(".yml")) continue
+        try {
+          const content = readFileSync(path.join(toolPath, file), "utf-8")
+          const recipe = yaml.load(content) as Record<string, any> | null
+          if (!recipe || !recipe.name) continue
+
+          // Don't override existing methods from the published registry
+          if (registry.tools[toolDir].methods?.[recipe.name]) continue
+
+          // Merge into registry
+          if (!registry.tools[toolDir].methods) {
+            registry.tools[toolDir].methods = {}
+          }
+          registry.tools[toolDir].methods[recipe.name] = {
+            description: recipe.description || "",
+            when_to_use: recipe.when_to_use || "",
+            params: Object.fromEntries(
+              Object.entries(recipe.params || {}).map(([k, v]: [string, any]) => [
+                k,
+                { type: v.type || "string", description: v.description || "" },
+              ]),
+            ),
+          }
+          log.debug("merged session recipe", { tool: toolDir, method: recipe.name })
+        } catch {
+          // Skip malformed recipe files silently
+        }
+      }
+    }
+  } catch {
+    // Session directory may not exist yet — non-critical
+  }
 }
 
 // =============================================================================
@@ -1179,6 +1246,9 @@ export const ToolRegistrySearchTool = Tool.define("tool_registry_search", {
 
     // Get registry with hash-based freshness
     const { registry, hash, cacheStatus } = await getRegistry()
+
+    // Merge dynamic recipes from /session/tool_recipes/ into registry
+    mergeSessionRecipes(registry, ctx.sessionID)
 
     // Search tools via LanceDB hybrid search
     const { results, warnings, scoredResults } = await searchToolsLance(registry, query, phase, capability, limit)
