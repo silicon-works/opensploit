@@ -604,6 +604,13 @@ export namespace ContainerManager {
         {
           timeout: options?.timeout ?? 300_000,
           resetTimeoutOnProgress: true,
+          onprogress: (progress) => {
+            log.info("tool progress", {
+              toolName,
+              method,
+              message: progress.message,
+            })
+          },
         }
       )
 
